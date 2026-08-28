@@ -109,17 +109,30 @@ async def list_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
+        # التحقق مما إذا كنت كتبت نصاً بعد أمر الإذاعة
+        if not context.args:
+            await update.message.reply_text("❌ يرجى كتابة النص المراد إرساله بعد الأمر هكذا:\n`/broadcast [اكتب رسالتك هنا]`", parse_mode="Markdown")
+            return
+
+        # دمج الكلمات المكتوبة بعد الأمر لتصبح هي رسالة البث
+        announcement = " ".join(context.args)
+
         cursor.execute("SELECT user_id FROM users")
         users = cursor.fetchall()
         
-        announcement = (
-            "⚠️ **إشعار تقني واعتذار رسمي**\n\n"
-            "أعزائنا المشتركين، نود إعلامكم أنه قد واجهنا مؤخراً توقفاً مؤقتاً في خدمات البوت نتيجة خطأ برمجي بسيط (خطأ في كتابة أحد أسطر الكود المصدري).\n\n"
-            "🛠️ **ما تم إنجازه:**\n"
-            "• تم تحديد موضع الخطأ البسيط ومعالجته بالكامل.\n"
-            "• تم إعادة هيكلة النظام لضمان استقرار الخدمة وسرعة الاستجابة الدائمة.\n\n"
-            "نعتذر عن أي إزعاج سببه هذا التوقف المفاجئ، ونشكر تفهمكم ودعمكم المستمر. البوت يعمل الآن بكفاءة عالية! 🚀"
-        )
+        success_count = 0
+        fail_count = 0
+        
+        for (u_id,) in users:
+            try:
+                await context.bot.send_message(chat_id=u_id, text=announcement, parse_mode="Markdown")
+                success_count += 1
+            except Exception:
+                fail_count += 1
+                
+        await update.message.reply_text(f"📢 تم إرسال الإعلان بنجاح!\n✅ وصل إلى: {success_count} مستخدم\n❌ فشل الوصول إلى: {fail_count} مستخدم")
+    else:
+        await update.message.reply_text("هذا الأمر مخصص للمطور فقط ❌")
         
         success_count = 0
         fail_count = 0
