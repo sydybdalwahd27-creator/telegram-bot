@@ -21,7 +21,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     TOKEN = "8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro"
     
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = ApplicationBuilder().token(TOKEN).read_timeout(30).write_timeout(30).connect_timeout(30).build()
     application.add_handler(CommandHandler("start", start))
     
     print("Bot is starting...")
