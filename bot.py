@@ -1,8 +1,9 @@
+
 import os
 import threading
 import sqlite3
 from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -70,6 +71,14 @@ cursor.execute('''
 ''')
 conn.commit()
 
+async def set_bot_commands(application):
+    # تعيين الأوامر التي تظهر في قائمة Menu الخاصة بتيليجرام
+    commands = [
+        BotCommand("start", "تشغيل البوت وعرض القائمة الرئيسية"),
+        BotCommand("lessons", "عرض قائمة المواد والدروس المحفوظة")
+    ]
+    await application.bot.set_my_commands(commands)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -120,6 +129,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
     elif update.callback_query:
         await update.callback_query.message.edit_text(welcome_text, reply_markup=reply_markup)
+
+async def lessons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # أمر جديد /lessons لفتح قائمة المواد والدروس مباشرة
+    await show_subjects_menu(update, context)
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
@@ -365,7 +378,6 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
         text = f"📂 مادة: {subject} ➔ فرع: {section}\nقائمة الدروس المحفوظة:"
         for rowid, title, c_type in lessons:
             type_label = "🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝")
-            # تمت إزالة زر التعديل من هنا، وأصبح يظهر حصرياً تحت الدرس عند طلبه
             keyboard.append([
                 InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op_{rowid}"),
                 InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{rowid}")
@@ -472,7 +484,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text(f"❌ تم حذف الدرس '{title}' بنجاح.")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
         elif prefix == "op":
-            # إرسال أزرار التحكم (تعديل الاسم أو حذف الدرس) تحت محتوى الدرس المرسل
             action_keyboard = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("تعديل الاسم ✏️", callback_data=f"edit_{rowid}"),
@@ -489,18 +500,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
-    app = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).build()
+    application = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("users", list_all_users))
-    app.add_handler(CommandHandler("broadcast", broadcast_message))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
-    app.add_handler(CallbackQueryHandler(button_callback))
+    # تسجيل الأوامر
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("lessons", lessons_command))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("users", list_all_users))
+    application.add_handler(CommandHandler("broadcast", broadcast_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
+    application.add_handler(CallbackQueryHandler(button_callback))
+
+    # تعيين الأوامر في قائمة التليجرام تلقائياً عند التشغيل
+    application.job_queue.run_once(lambda ctx: set_bot_commands(application), when=1)
 
     print("Bot is starting...")
-    app.run_polling()
+    application.run_polling()
 
 if __name__ == '__main__':
     t = threading.Thread(target=run_web)
