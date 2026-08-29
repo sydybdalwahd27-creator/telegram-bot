@@ -67,16 +67,6 @@ cursor.execute('''
 ''')
 conn.commit()
 
-async def set_bot_commands(application):
-    commands = [
-        BotCommand("start", "تشغيل البوت وعرض القائمة الرئيسية"),
-        BotCommand("lessons", "عرض قائمة المواد والدروس المحفوظة")
-    ]
-    try:
-        await application.bot.set_my_commands(commands)
-    except Exception:
-        pass
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -457,9 +447,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif c_type == "document":
                 await context.bot.send_document(chat_id=chat_id, document=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
 
+async def post_init(application):
+    commands = [
+        BotCommand("start", "تشغيل البوت وعرض القائمة الرئيسية"),
+        BotCommand("lessons", "عرض قائمة المواد والدروس المحفوظة")
+    ]
+    try:
+        await application.bot.set_my_commands(commands)
+    except Exception:
+        pass
+
 def main():
     request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
-    application = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).build()
+    application = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).post_init(post_init).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("lessons", lessons_command))
@@ -470,9 +470,6 @@ def main():
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    application.job_queue.run_once(lambda ctx: set_bot_commands(application), when=1)
-
-    # تشغيل سيرفر الويب في الخلفية لكي تقبل منصة Render التطبيق دون مشاكل
     t = threading.Thread(target=run_web, daemon=True)
     t.start()
 
