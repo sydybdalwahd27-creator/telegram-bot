@@ -1,15 +1,21 @@
 
 import os
+import threading
 import sqlite3
-from flask import Flask, request
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
 app = Flask(__name__)
 
-TOKEN = "8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro"
-# ضع هنا رابط تطبيقك على Render مباشرة (مثال: https://your-app-name.onrender.com)
-WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://your-app-name.onrender.com")
+@app.route('/')
+def home():
+    return "Bot is running 24/7!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 DEVELOPER_USERNAME = "@ota_m_pro"
 ADMIN_ID = 8504617214
@@ -61,15 +67,15 @@ cursor.execute('''
 ''')
 conn.commit()
 
-# إعداد التطبيق بدون polling
-telegram_app = Application.builder().token(TOKEN).updater(None).build()
-
-async def set_bot_commands():
+async def set_bot_commands(application):
     commands = [
         BotCommand("start", "تشغيل البوت وعرض القائمة الرئيسية"),
         BotCommand("lessons", "عرض قائمة المواد والدروس المحفوظة")
     ]
-    await telegram_app.bot.set_my_commands(commands)
+    try:
+        await application.bot.set_my_commands(commands)
+    except Exception:
+        pass
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -435,7 +441,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if prefix == "dl":
             cursor.execute("DELETE FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
             conn.commit()
-            await query.message.edit_text(f"❌ تم حذف الدرس '{title}' بنجاح.")
+            await query.message.reply_text(f"❌ تم حذف الدرس '{title}' بنجاح.")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
         elif prefix == "op":
             action_keyboard = InlineKeyboardMarkup([
@@ -451,36 +457,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif c_type == "document":
                 await context.bot.send_document(chat_id=chat_id, document=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
 
-# تسجيل الهاندلرز
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("lessons", lessons_command))
-telegram_app.add_handler(CommandHandler("stats", stats))
-telegram_app.add_handler(CommandHandler("users", list_all_users))
-telegram_app.add_handler(CommandHandler("broadcast", broadcast_message))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
-telegram_app.add_handler(CallbackQueryHandler(button_callback))
+def main():
+    request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
+    application = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).build()
 
-@app.route('/')
-def home():
-    return "Bot is running 24/7 via Webhook!"
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("lessons", lessons_command))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("users", list_all_users))
+    application.add_handler(CommandHandler("broadcast", broadcast_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
+    application.add_handler(CallbackQueryHandler(button_callback))
 
-@app.route(f'/{TOKEN}', methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.update_queue.put(update)
-    return 'ok'
+    application.job_queue.run_once(lambda ctx: set_bot_commands(application), when=1)
 
-async def setup_webhook():
-    await telegram_app.initialize()
-    await set_bot_commands()
-    await telegram_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-    await telegram_app.start()
+    # تشغيل سيرفر الويب في الخلفية لكي تقبل منصة Render التطبيق دون مشاكل
+    t = threading.Thread(target=run_web, daemon=True)
+    t.start()
 
-import asyncio
-loop = asyncio.get_event_loop()
-loop.run_until_complete(setup_webhook())
+    print("Bot is starting with polling...")
+    application.run_polling()
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    main()
