@@ -1,3 +1,4 @@
+
 import os
 import threading
 import sqlite3
@@ -22,7 +23,6 @@ ADMIN_ID = 8504617214
 conn = sqlite3.connect('study_data.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# تحديث قاعدة البيانات لدعم المواد، الفروع، والدروس
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS lessons (
         user_id INTEGER,
@@ -40,7 +40,6 @@ cursor.execute('''
         first_name TEXT
     )
 ''')
-# جدول مؤقت لحفظ الحالة عندما يكتب الطالب اسم مادة جديدة أو فرع جديد
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS user_states (
         user_id INTEGER PRIMARY KEY,
@@ -132,7 +131,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # التحقق من حالة المستخدم إذا كان بصدد إضافة مادة أو فرع جديد عبر الأزرار
     cursor.execute("SELECT state, temp_data FROM user_states WHERE user_id = ?", (user_id,))
     state_row = cursor.fetchone()
 
@@ -152,13 +150,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ تم إضافة الفرع '{sec_name}' لمادة [{subject}] بنجاح!\nلحفظ درس فيه أرسل:\n`{subject}: {sec_name}: العنوان: المحتوى`", parse_mode="Markdown")
             return
 
-    # الكلمات المفتاحية لعرض القائمة
     list_keywords = ["قائمة", "اعرض", "اضهر", "أضهر", "دروسي", "الدروس", "موادي"]
     if any(keyword in text for keyword in list_keywords) and ":" not in text:
         await show_subjects_menu(update, context)
         return
 
-    # صيغة الحفظ الذكية المباشرة
     if ":" in text:
         try:
             parts = [p.strip() for p in text.split(":", 3)]
@@ -211,7 +207,6 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if subjects:
         for (sub,) in subjects:
-            # زر عرض المادة وأزرار الحذف بجانبها
             keyboard.append([
                 InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub_{sub}"),
                 InlineKeyboardButton("حذف المادة 🗑️", callback_data=f"del_sub_{sub}")
@@ -250,7 +245,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("✍️ أرسل الآن اسم المادة الجديدة التي تريد إضافتها:")
         return
 
-    # حذف مادة كاملة
     if data.startswith("del_sub_"):
         sub_to_del = data.replace("del_sub_", "", 1)
         cursor.execute("DELETE FROM lessons WHERE user_id = ? AND subject = ?", (user_id, sub_to_del))
@@ -258,7 +252,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_subjects_menu(update, context)
         return
 
-    # اختيار مادة لعرض فروعها
     if data.startswith("sub_"):
         subject = data.replace("sub_", "", 1)
         cursor.execute("SELECT DISTINCT section FROM lessons WHERE user_id = ? AND subject = ?", (user_id, subject))
@@ -278,7 +271,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(f"📚 مادة: {subject}\nاختر الفروع المطلوبة:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    # طلب إضافة فرع جديد لمادة معينة
     if data.startswith("add_sec_"):
         subject = data.replace("add_sec_", "", 1)
         cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", (user_id, "waiting_for_section", subject))
@@ -286,14 +278,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(f"✍️ أرسل الآن اسم الفرع الجديد الذي تريد إضافته لمادة [{subject}]:")
         return
 
-    # حذف فرع كامل مع دروسه
     if data.startswith("del_sec_"):
         parts = data.replace("del_sec_", "", 1).split("_", 1)
         subject, section = parts[0], parts[1]
         cursor.execute("DELETE FROM lessons WHERE user_id = ? AND subject = ? AND section = ?", (user_id, subject, section))
         conn.commit()
         
-        # إعادة توجيه لنفس قائمة فروع المادة
         cursor.execute("SELECT DISTINCT section FROM lessons WHERE user_id = ? AND subject = ?", (user_id, subject))
         sections = cursor.fetchall()
         keyboard = []
@@ -309,7 +299,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(f"📚 مادة: {subject}\nتم حذف الفرع بنجاح.", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    # عرض دروس الفرع المحدد
     if data.startswith("sec_"):
         parts = data.replace("sec_", "", 1).split("_", 1)
         subject, section = parts[0], parts[1]
@@ -328,7 +317,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(f"📂 مادة: {subject} ➔ فرع: {section}\nاختر الدرس:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    # فتح أو حذف درس منفرد
     if data.startswith("op_") or data.startswith("dl_"):
         prefix, rowid = data.split("_", 1)
         cursor.execute("SELECT subject, section, title, content_type, file_or_text FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
@@ -363,7 +351,7 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     print("Bot is starting...")
