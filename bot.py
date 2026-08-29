@@ -1,21 +1,15 @@
 
 import os
-import threading
 import sqlite3
-from flask import Flask
+from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from telegram.request import HTTPXRequest
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot is running 24/7!"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+TOKEN = "8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro"
+# ضع هنا رابط تطبيقك على Render مباشرة (مثال: https://your-app-name.onrender.com)
+WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://your-app-name.onrender.com")
 
 DEVELOPER_USERNAME = "@ota_m_pro"
 ADMIN_ID = 8504617214
@@ -23,7 +17,6 @@ ADMIN_ID = 8504617214
 conn = sqlite3.connect('study_data.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# جدول لتخزين المواد الخاصة بكل مستخدم
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS subjects (
         user_id INTEGER,
@@ -31,7 +24,6 @@ cursor.execute('''
     )
 ''')
 
-# جدول لتخزين الفروع الخاصة بكل مادة
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS sections (
         user_id INTEGER,
@@ -40,7 +32,6 @@ cursor.execute('''
     )
 ''')
 
-# جدول لتخزين الدروس داخل الفروع
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS lessons (
         user_id INTEGER,
@@ -52,7 +43,6 @@ cursor.execute('''
     )
 ''')
 
-# جدول المستخدمين مع حقل welcomed لتتبع رسالة الترحيب الأولى فقط
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
@@ -71,13 +61,15 @@ cursor.execute('''
 ''')
 conn.commit()
 
-async def set_bot_commands(application):
-    # تعيين الأوامر التي تظهر في قائمة Menu الخاصة بتيليجرام
+# إعداد التطبيق بدون polling
+telegram_app = Application.builder().token(TOKEN).updater(None).build()
+
+async def set_bot_commands():
     commands = [
         BotCommand("start", "تشغيل البوت وعرض القائمة الرئيسية"),
         BotCommand("lessons", "عرض قائمة المواد والدروس المحفوظة")
     ]
-    await application.bot.set_my_commands(commands)
+    await telegram_app.bot.set_my_commands(commands)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -109,7 +101,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_first_time:
         cursor.execute("UPDATE users SET welcomed = 1 WHERE user_id = ?", (user_id,))
         conn.commit()
-
         welcome_text = (
             f"👋 أهلاً بك يا {first_name} في بوت BAC 2027 المطور!\n\n"
             "📌 **طريقة استخدام البوت لأول مرة:**\n"
@@ -131,7 +122,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.edit_text(welcome_text, reply_markup=reply_markup)
 
 async def lessons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # أمر جديد /lessons لفتح قائمة المواد والدروس مباشرة
     await show_subjects_menu(update, context)
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,11 +134,9 @@ async def list_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         cursor.execute("SELECT user_id, username, first_name FROM users")
         users = cursor.fetchall()
-        
         if not users:
             await update.message.reply_text("لا توجد أي أعضاء مسجلين حتى الآن.")
             return
-
         text = "👥 قائمة الأعضاء المسجلين في البوت:\n\n"
         for idx, (u_id, username, first_name) in enumerate(users, 1):
             user_link = f"[{first_name}](https://t.me/{username.replace('@', '')})" if username and username != "بدون يوزر" else f"{first_name} (بدون معرف)"
@@ -183,13 +171,11 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-
     cursor.execute("SELECT state, temp_data FROM user_states WHERE user_id = ?", (user_id,))
     state_row = cursor.fetchone()
 
     if state_row:
         state, temp_data = state_row[0], state_row[1]
-        
         if state == "waiting_for_subject":
             sub_name = text
             cursor.execute("SELECT * FROM subjects WHERE user_id = ? AND subject_name = ?", (user_id, sub_name))
@@ -199,12 +185,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cursor.execute("INSERT INTO subjects VALUES (?, ?)", (user_id, sub_name))
                 conn.commit()
                 await update.message.reply_text(f"✅ تمت إضافة المادة '{sub_name}' بنجاح!")
-            
             cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
             conn.commit()
             await show_subjects_menu(update, context)
             return
-
         elif state == "waiting_for_section":
             subject = temp_data
             sec_name = text
@@ -215,48 +199,38 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cursor.execute("INSERT INTO sections VALUES (?, ?, ?)", (user_id, subject, sec_name))
                 conn.commit()
                 await update.message.reply_text(f"✅ تم إضافة الفرع '{sec_name}' لمادة [{subject}] بنجاح!")
-
             cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
             conn.commit()
             await show_sections_menu_direct(update, context, user_id, subject)
             return
-
         elif state.startswith("waiting_for_lesson_title_"):
             parts = temp_data.split("|")
             subject, section = parts[0], parts[1]
             title = text
-            
             cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", 
                            (user_id, f"waiting_for_lesson_content_{subject}|{section}|{title}", title))
             conn.commit()
             await update.message.reply_text(f"✍️ أرسل الآن محتوى الدرس '{title}' (أو أرسل صورة/ملف مباشرة):")
             return
-
         elif state.startswith("waiting_for_lesson_content_"):
             parts = state.replace("waiting_for_lesson_content_", "").split("|")
             subject, section, title = parts[0], parts[1], parts[2]
-            
             cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, "text", text))
             conn.commit()
             cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
             conn.commit()
-            
             await update.message.reply_text(f"✅ تم حفظ الدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
-
         elif state.startswith("waiting_for_edit_lesson_"):
             rowid = state.replace("waiting_for_edit_lesson_", "")
             new_title = text
-
             cursor.execute("UPDATE lessons SET title = ? WHERE rowid = ? AND user_id = ?", (new_title, rowid, user_id))
             conn.commit()
-
             cursor.execute("SELECT subject_name, section_name FROM lessons WHERE rowid = ?", (rowid,))
             res = cursor.fetchone()
             cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
             conn.commit()
-
             if res:
                 sub, sec = res[0], res[1]
                 await update.message.reply_text(f"✅ تم تعديل اسم الدرس بنجاح إلى: '{new_title}'")
@@ -289,30 +263,24 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
 
     if state_row:
         state, temp_data = state_row[0], state_row[1]
-        
         if state.startswith("waiting_for_lesson_title_"):
             parts = temp_data.split("|")
             subject, section = parts[0], parts[1]
             title = update.message.caption if update.message.caption else "صورة الدرس"
-
             cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, c_type, file_id))
             conn.commit()
             cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
             conn.commit()
-
             await update.message.reply_text(f"✅ تم حفظ الصورة للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
-
         elif state.startswith("waiting_for_lesson_content_"):
             parts = state.replace("waiting_for_lesson_content_", "").split("|")
             subject, section, title = parts[0], parts[1], parts[2]
-
             cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, c_type, file_id))
             conn.commit()
             cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
             conn.commit()
-
             await update.message.reply_text(f"✅ تم حفظ الملف/الصورة للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
@@ -323,21 +291,17 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
     cursor.execute("SELECT subject_name FROM subjects WHERE user_id = ?", (user_id,))
     subjects = cursor.fetchall()
-    
     text = "📚 قائمة موادي الدراسية:\nاختر المادة لتصفح فروعها ودروسها أو إدارتها:"
     keyboard = []
-    
     if subjects:
         for (sub,) in subjects:
             keyboard.append([
                 InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub_{sub}"),
                 InlineKeyboardButton("حذف المادة 🗑️", callback_data=f"del_sub_{sub}")
             ])
-            
     keyboard.append([InlineKeyboardButton("➕ إضافة مادة جديدة", callback_data="add_subject")])
     keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     if update.callback_query:
         try:
             await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
@@ -349,7 +313,6 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def show_sections_menu_direct(update, context, user_id, subject):
     cursor.execute("SELECT section_name FROM sections WHERE user_id = ? AND subject_name = ?", (user_id, subject))
     sections = cursor.fetchall()
-    
     keyboard = []
     if sections:
         text = f"📚 مادة: {subject}\nاختر الفرع المطلوب:"
@@ -360,10 +323,8 @@ async def show_sections_menu_direct(update, context, user_id, subject):
             ])
     else:
         text = f"📚 مادة: {subject}\n❌ أنت لا تملك أي فروع في هذه المادة حالياً."
-
     keyboard.append([InlineKeyboardButton("➕ إضافة فرع جديد", callback_data=f"add_sec_{subject}")])
     keyboard.append([InlineKeyboardButton("🔙 رجوع للمواد", callback_data="show_subjects")])
-    
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
@@ -372,7 +333,6 @@ async def show_sections_menu_direct(update, context, user_id, subject):
 async def show_lessons_menu_direct(update, context, user_id, subject, section):
     cursor.execute("SELECT rowid, title, content_type FROM lessons WHERE user_id = ? AND subject_name = ? AND section_name = ?", (user_id, subject, section))
     lessons = cursor.fetchall()
-    
     keyboard = []
     if lessons:
         text = f"📂 مادة: {subject} ➔ فرع: {section}\nقائمة الدروس المحفوظة:"
@@ -384,10 +344,8 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
             ])
     else:
         text = f"📂 مادة: {subject} ➔ فرع: {section}\n❌ أنت لا تملك أي دروس في هذا الفرع."
-
     keyboard.append([InlineKeyboardButton("➕ إضافة درس جديد", callback_data=f"add_lesson_{subject}_{section}")])
     keyboard.append([InlineKeyboardButton("🔙 رجوع للفروع", callback_data=f"sub_{subject}")])
-    
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
@@ -396,7 +354,6 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     user_id = query.from_user.id
     data = query.data
 
@@ -470,14 +427,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prefix, rowid = data.split("_", 1)
         cursor.execute("SELECT subject_name, section_name, title, content_type, file_or_text FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
         row = cursor.fetchone()
-        
         if not row:
             await query.message.reply_text("❌ عذراً، لم يتم العثور على العنصر.")
             return
-            
         subject, section, title, c_type, data_val = row[0], row[1], row[2], row[3], row[4]
         chat_id = query.message.chat_id
-        
         if prefix == "dl":
             cursor.execute("DELETE FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
             conn.commit()
@@ -490,7 +444,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("حذف الدرس 🗑️", callback_data=f"dl_{rowid}")
                 ]
             ])
-            
             if c_type == "text":
                 await context.bot.send_message(chat_id=chat_id, text=f"📖 [{subject} / {section}] - {title}:\n\n{data_val}", reply_markup=action_keyboard)
             elif c_type == "photo":
@@ -498,27 +451,36 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif c_type == "document":
                 await context.bot.send_document(chat_id=chat_id, document=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
 
-def main():
-    request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
-    application = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).build()
+# تسجيل الهاندلرز
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CommandHandler("lessons", lessons_command))
+telegram_app.add_handler(CommandHandler("stats", stats))
+telegram_app.add_handler(CommandHandler("users", list_all_users))
+telegram_app.add_handler(CommandHandler("broadcast", broadcast_message))
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+telegram_app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
+telegram_app.add_handler(CallbackQueryHandler(button_callback))
 
-    # تسجيل الأوامر
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("lessons", lessons_command))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("users", list_all_users))
-    application.add_handler(CommandHandler("broadcast", broadcast_message))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
-    application.add_handler(CallbackQueryHandler(button_callback))
+@app.route('/')
+def home():
+    return "Bot is running 24/7 via Webhook!"
 
-    # تعيين الأوامر في قائمة التليجرام تلقائياً عند التشغيل
-    application.job_queue.run_once(lambda ctx: set_bot_commands(application), when=1)
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+    telegram_app.update_queue.put(update)
+    return 'ok'
 
-    print("Bot is starting...")
-    application.run_polling()
+async def setup_webhook():
+    await telegram_app.initialize()
+    await set_bot_commands()
+    await telegram_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    await telegram_app.start()
+
+import asyncio
+loop = asyncio.get_event_loop()
+loop.run_until_complete(setup_webhook())
 
 if __name__ == '__main__':
-    t = threading.Thread(target=run_web)
-    t.start()
-    main()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
