@@ -21,9 +21,13 @@ ADMIN_ID = 8504617214
 
 conn = sqlite3.connect('study_data.db', check_same_thread=False)
 cursor = conn.cursor()
+
+# تحديث هيكل قاعدة البيانات ليدعم المواد والفروع
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS lessons (
         user_id INTEGER,
+        subject TEXT,
+        section TEXT,
         title TEXT,
         content_type TEXT,
         file_or_text TEXT
@@ -55,18 +59,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     welcome_text = (
-        "👋 أهلاً بك في بوت BAC 2027!\n\n"
-        "مساحتك الشخصية لتنظيم وحفظ دروسك ومراجعك بسهولة.\n\n"
-        "📌 خطوات الاستخدام وطريقة العمل:\n"
-        "1️⃣ لحفظ نص أو رابط: أرسل `حفظ اسم الدرس: محتوى الدرس`\n"
-        "2️⃣ لحفظ صورة أو ملف: أرسل الصورة/الملف واكتب اسم الدرس في الوصف.\n"
-        "3️⃣ لاسترجاع درس: أرسل كلمة `هات` متبوعة باسم الدرس.\n"
-        "4️⃣ لعرض كل دروسك: أرسل كلمة `دروسي` أو `/list`.\n\n"
-        "💡 تلميح: يمكنك الضغط على الأزرار أدناه للتصفح أو التواصل."
+        "👋 أهلاً بك في بوت BAC 2027 المطور!\n\n"
+        "مساحتك الشخصية لتنظيم وحفظ دروسك حسب المواد والفروع بسهولة.\n\n"
+        "📌 طريقة الحفظ السريع:\n"
+        "• أرسل بالصيغة التالية:\n"
+        "`المادة: الفرع: عنوان الدرس: المحتوى`\n"
+        "مثال: `فيزياء: ملخصات: الميكانيك: قانون نيوتن الثاني...`\n\n"
+        "💡 أو أرسل صورة/ملف واكتب في الوصف: `المادة: الفرع: عنوان الدرس`"
     )
     
     keyboard = [
-        [InlineKeyboardButton("📚 عرض دروسي", callback_data="show_list")],
+        [InlineKeyboardButton("📚 عرض دروسي وموادي", callback_data="show_subjects")],
         [InlineKeyboardButton("💬 مراسلة المطور للاقتراحات", url=f"https://t.me/{DEVELOPER_USERNAME.replace('@', '')}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -131,118 +134,80 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("هذا الأمر مخصص للمطور فقط ❌")
 
-async def send_lesson_content(user_id, title, chat_id, context: ContextTypes.DEFAULT_TYPE):
-    cursor.execute("SELECT title, content_type, file_or_text FROM lessons WHERE user_id = ? AND title = ?", (user_id, title))
-    row = cursor.fetchone()
-
-    if row:
-        t_title, c_type, data = row[0], row[1], row[2]
-        keyboard = [
-            [InlineKeyboardButton("📖 فتح", callback_data=f"op_{t_title[:10]}")],
-            [InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{t_title[:10]}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        if c_type == "text":
-            await context.bot.send_message(chat_id=chat_id, text=f"📖 محتوى {t_title}:\n\n{data}", reply_markup=reply_markup)
-        elif c_type == "photo":
-            await context.bot.send_photo(chat_id=chat_id, photo=data, caption=f"📖 الدرس: {t_title}", reply_markup=reply_markup)
-        elif c_type == "document":
-            await context.bot.send_document(chat_id=chat_id, document=data, caption=f"📖 الدرس: {t_title}", reply_markup=reply_markup)
-
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    list_keywords = ["قائمة", "اعرض", "اضهر", "أضهر", "دروسي", "الدروس"]
-    if any(keyword in text for keyword in list_keywords) and not any(text.startswith(k) for k in ["حفظ", "احفظ", "هات", "أعطني", "اعطني"]):
-        await list_lessons(update, context)
+    list_keywords = ["قائمة", "اعرض", "اضهر", "أضهر", "دروسي", "الدروس", "موادي"]
+    if any(keyword in text for keyword in list_keywords) and ":" not in text:
+        await show_subjects_menu(update, context)
         return
 
-    if text.startswith("حفظ ") or text.startswith("احفظ "):
+    # صيغة الحفظ الجديدة: المادة: الفرع: العنوان: المحتوى
+    if ":" in text:
         try:
-            clean_text = text.replace("احفظ ", "").replace("حفظ ", "")
-            parts = clean_text.split(":", 1)
-            title = parts[0].strip()
-            content = parts[1].strip()
-            cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?)", (user_id, title, "text", content))
-            conn.commit()
-            await update.message.reply_text(f"تم حفظ '{title}' بنجاح!")
+            parts = [p.strip() for p in text.split(":", 3)]
+            if len(parts) >= 4:
+                subject, section, title, content = parts[0], parts[1], parts[2], parts[3]
+                cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, "text", content))
+                conn.commit()
+                await update.message.reply_text(f"✅ تم حفظ الدرس '{title}' في مادة [{subject} -> {section}] بنجاح!")
+                return
         except Exception:
-            await update.message.reply_text("الصيغة الصحيحة: حفظ اسم الدرس: المحتوى")
-        return
+            pass
 
-    query_title = text
-    for prefix in ["هات ", "أعطني ", "اعطني ", "ارسل ", "وريني "]:
-        if text.startswith(prefix):
-            query_title = text[len(prefix):].strip()
-            break
-
-    cursor.execute("SELECT title FROM lessons WHERE user_id = ? AND (LOWER(title) = LOWER(?) OR title LIKE ?)", (user_id, query_title, f"%{query_title}%"))
-    row = cursor.fetchone()
-
-    if row:
-        await send_lesson_content(user_id, row[0], update.effective_chat.id, context)
-    elif text.startswith(("هات", "أعطني", "اعطني", "ارسل", "الدرس")):
-        await update.message.reply_text(f"لم أجد درساً باسم '{query_title}'.")
+    await update.message.reply_text("❌ الصيغة غير صحيحة.\nللصيغة الصحيحة:\n`المادة: الفرع: عنوان الدرس: المحتوى`", parse_mode="Markdown")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     caption = update.message.caption
-    if caption:
-        doc_id = update.message.photo[-1].file_id
-        cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?)", (user_id, caption.strip(), "photo", doc_id))
-        conn.commit()
-        await update.message.reply_text(f"تم حفظ صورة '{caption.strip()}' بنجاح!")
-    else:
-        await update.message.reply_text("يرجى كتابة اسم الدرس في وصف الصورة.")
+    if caption and ":" in caption:
+        parts = [p.strip() for p in caption.split(":", 2)]
+        if len(parts) >= 3:
+            subject, section, title = parts[0], parts[1], parts[2]
+            photo_id = update.message.photo[-1].file_id
+            cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, "photo", photo_id))
+            conn.commit()
+            await update.message.reply_text(f"✅ تم حفظ الصورة '{title}' تحت [{subject} -> {section}] بنجاح!")
+            return
+    await update.message.reply_text("❌ يجيب كتابة الوصف بالشكل التالي:\n`المادة: الفرع: عنوان الدرس`", parse_mode="Markdown")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     caption = update.message.caption
-    if caption:
-        doc_id = update.message.document.file_id
-        cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?)", (user_id, caption.strip(), "document", doc_id))
-        conn.commit()
-        await update.message.reply_text(f"تم حفظ الملف '{caption.strip()}' بنجاح!")
-    else:
-        await update.message.reply_text("يرجى كتابة اسم الدرس في وصف الملف.")
+    if caption and ":" in caption:
+        parts = [p.strip() for p in caption.split(":", 2)]
+        if len(parts) >= 3:
+            subject, section, title = parts[0], parts[1], parts[2]
+            doc_id = update.message.document.file_id
+            cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, "document", doc_id))
+            conn.commit()
+            await update.message.reply_text(f"✅ تم حفظ الملف '{title}' تحت [{subject} -> {section}] بنجاح!")
+            return
+    await update.message.reply_text("❌ يرجى كتابة الوصف بالشكل التالي:\n`المادة: الفرع: عنوان الدرس`", parse_mode="Markdown")
 
-async def list_lessons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    cursor.execute("SELECT rowid, title, content_type FROM lessons WHERE user_id = ?", (user_id,))
-    rows = cursor.fetchall()
+async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
+    cursor.execute("SELECT DISTINCT subject FROM lessons WHERE user_id = ?", (user_id,))
+    subjects = cursor.fetchall()
     
-    chat_id = update.effective_chat.id
+    text = "📚 اختر المادة الدراسية لعرض فروعها ودروسها:"
+    keyboard = []
     
-    if rows:
-        text = "📚 قائمة الدروس المحفوظة لديك:\nاختر الدرس للفتح أو الحذف:"
-        keyboard = []
-        for r in rows:
-            row_id, title, c_type = r[0], r[1], r[2]
-            type_label = "🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝")
-            
-            keyboard.append([InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op_{row_id}")])
-            keyboard.append([InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{row_id}")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        if update.callback_query:
-            try:
-                await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
-            except Exception:
-                await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-        else:
-            await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    if subjects:
+        for (sub,) in subjects:
+            keyboard.append([InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub_{sub}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        try:
+            await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
+        except Exception:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup)
     else:
-        empty_msg = "⚠️ لا توجد دروس محفوظة لديك بعد!"
-        if update.callback_query:
-            try:
-                await update.callback_query.message.edit_text(empty_msg)
-            except Exception:
-                await context.bot.send_message(chat_id=chat_id, text=empty_msg)
-        else:
-            await context.bot.send_message(chat_id=chat_id, text=empty_msg)
+        await update.message.reply_text(text, reply_markup=reply_markup)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -251,36 +216,73 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    if data == "show_list":
-        await list_lessons(update, context)
+    if data == "show_subjects":
+        await show_subjects_menu(update, context)
+        return
+    elif data == "main_menu":
+        await query.message.edit_text("🏠 القائمة الرئيسية للبوت.")
         return
 
-    prefix, row_id = data.split("_", 1)
-    cursor.execute("SELECT title FROM lessons WHERE rowid = ? AND user_id = ?", (row_id, user_id))
-    row = cursor.fetchone()
-
-    if not row:
-        await query.message.reply_text("❌ عذراً، لم يتم العثور على هذا الدرس.")
+    if data.startswith("sub_"):
+        subject = data.replace("sub_", "", 1)
+        cursor.execute("SELECT DISTINCT section FROM lessons WHERE user_id = ? AND subject = ?", (user_id, subject))
+        sections = cursor.fetchall()
+        
+        keyboard = []
+        for (sec,) in sections:
+            keyboard.append([InlineKeyboardButton(f"📂 فرع: {sec}", callback_data=f"sec_{subject}_{sec}")])
+        keyboard.append([InlineKeyboardButton("🔙 رجوع للمواد", callback_data="show_subjects")])
+        
+        await query.message.edit_text(f"📚 مادة: {subject}\nاختر الفروع المطلوبة:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    matched_title = row[0]
+    if data.startswith("sec_"):
+        parts = data.replace("sec_", "", 1).split("_", 1)
+        subject, section = parts[0], parts[1]
+        
+        cursor.execute("SELECT rowid, title, content_type FROM lessons WHERE user_id = ? AND subject = ? AND section = ?", (user_id, subject, section))
+        lessons = cursor.fetchall()
+        
+        keyboard = []
+        for rowid, title, c_type in lessons:
+            type_label = "🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝")
+            keyboard.append([InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op_{rowid}")])
+            keyboard.append([InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{rowid}")])
+            
+        keyboard.append([InlineKeyboardButton("🔙 رجوع للفروع", callback_data=f"sub_{subject}")])
+        
+        await query.message.edit_text(f"📂 مادة: {subject} ➔ فرع: {section}\nاختر الدرس:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
 
-    if prefix == "dl":
-        cursor.execute("DELETE FROM lessons WHERE rowid = ? AND user_id = ?", (row_id, user_id))
-        conn.commit()
-        try:
-            await query.edit_message_text(f"❌ تم حذف الدرس '{matched_title}' بنجاح.")
-        except Exception:
-            await query.message.reply_text(f"❌ تم حذف الدرس '{matched_title}' بنجاح.")
-    elif prefix == "op":
-        await send_lesson_content(user_id, matched_title, query.message.chat_id, context)
+    if data.startswith("op_") or data.startswith("dl_"):
+        prefix, rowid = data.split("_", 1)
+        cursor.execute("SELECT subject, section, title, content_type, file_or_text FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
+        row = cursor.fetchone()
+        
+        if not row:
+            await query.message.reply_text("❌ عذراً، لم يتم العثور على العنصر.")
+            return
+            
+        subject, section, title, c_type, data_val = row[0], row[1], row[2], row[3], row[4]
+        chat_id = query.message.chat_id
+        
+        if prefix == "dl":
+            cursor.execute("DELETE FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
+            conn.commit()
+            await query.message.edit_text(f"❌ تم حذف '{title}' بنجاح.")
+        elif prefix == "op":
+            if c_type == "text":
+                await context.bot.send_message(chat_id=chat_id, text=f"📖 [{subject} / {section}] - {title}:\n\n{data_val}")
+            elif c_type == "photo":
+                await context.bot.send_photo(chat_id=chat_id, photo=data_val, caption=f"📖 [{subject} / {section}] - {title}")
+            elif c_type == "document":
+                await context.bot.send_document(chat_id=chat_id, document=data_val, caption=f"📖 [{subject} / {section}] - {title}")
 
 def main():
     request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
     app = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("list", list_lessons))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("users", list_all_users))
     app.add_handler(CommandHandler("broadcast", broadcast_message))
