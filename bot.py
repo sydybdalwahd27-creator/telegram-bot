@@ -1,4 +1,3 @@
-
 import os
 import threading
 import sqlite3
@@ -233,6 +232,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
 
+        elif state.startswith("waiting_for_edit_lesson_"):
+            rowid = state.replace("waiting_for_edit_lesson_", "")
+            new_title = text
+
+            cursor.execute("UPDATE lessons SET title = ? WHERE rowid = ? AND user_id = ?", (new_title, rowid, user_id))
+            conn.commit()
+
+            cursor.execute("SELECT subject_name, section_name FROM lessons WHERE rowid = ?", (rowid,))
+            res = cursor.fetchone()
+            cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
+            conn.commit()
+
+            if res:
+                sub, sec = res[0], res[1]
+                await update.message.reply_text(f"✅ تم تعديل اسم الدرس بنجاح إلى: '{new_title}'")
+                await show_lessons_menu_direct(update, context, user_id, sub, sec)
+            else:
+                await update.message.reply_text("✅ تم التعديل بنجاح.")
+                await show_subjects_menu(update, context)
+            return
+
     list_keywords = ["قائمة", "اعرض", "اضهر", "أضهر", "دروسي", "الدروس", "موادي"]
     if any(keyword in text for keyword in list_keywords):
         await show_subjects_menu(update, context)
@@ -345,6 +365,7 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
         text = f"📂 مادة: {subject} ➔ فرع: {section}\nقائمة الدروس المحفوظة:"
         for rowid, title, c_type in lessons:
             type_label = "🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝")
+            # تمت إزالة زر التعديل من هنا، وأصبح يظهر حصرياً تحت الدرس عند طلبه
             keyboard.append([
                 InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op_{rowid}"),
                 InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{rowid}")
@@ -426,6 +447,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(f"✍️ أرسل الآن **عنوان الدرس** الجديد (أو أرسل الصورة/الملف مباشرة):", parse_mode="Markdown")
         return
 
+    if data.startswith("edit_"):
+        rowid = data.replace("edit_", "", 1)
+        cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", (user_id, f"waiting_for_edit_lesson_{rowid}", ""))
+        conn.commit()
+        await query.message.reply_text("✍️ أرسل الآن **اسم الدرس الجديد**:")
+        return
+
     if data.startswith("op_") or data.startswith("dl_"):
         prefix, rowid = data.split("_", 1)
         cursor.execute("SELECT subject_name, section_name, title, content_type, file_or_text FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
@@ -444,12 +472,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text(f"❌ تم حذف الدرس '{title}' بنجاح.")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
         elif prefix == "op":
+            # إرسال أزرار التحكم (تعديل الاسم أو حذف الدرس) تحت محتوى الدرس المرسل
+            action_keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("تعديل الاسم ✏️", callback_data=f"edit_{rowid}"),
+                    InlineKeyboardButton("حذف الدرس 🗑️", callback_data=f"dl_{rowid}")
+                ]
+            ])
+            
             if c_type == "text":
-                await context.bot.send_message(chat_id=chat_id, text=f"📖 [{subject} / {section}] - {title}:\n\n{data_val}")
+                await context.bot.send_message(chat_id=chat_id, text=f"📖 [{subject} / {section}] - {title}:\n\n{data_val}", reply_markup=action_keyboard)
             elif c_type == "photo":
-                await context.bot.send_photo(chat_id=chat_id, photo=data_val, caption=f"📖 [{subject} / {section}] - {title}")
+                await context.bot.send_photo(chat_id=chat_id, photo=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
             elif c_type == "document":
-                await context.bot.send_document(chat_id=chat_id, document=data_val, caption=f"📖 [{subject} / {section}] - {title}")
+                await context.bot.send_document(chat_id=chat_id, document=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
 
 def main():
     request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
