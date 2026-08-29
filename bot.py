@@ -20,6 +20,7 @@ def run_web():
 DEVELOPER_USERNAME = "@ota_m_pro"
 ADMIN_ID = 8504617214
 
+# استخدام مجلد مؤقت أو مسار ثابت إذا كان مدعوماً، ولكن يفضل دائماً ربط قاعدة بيانات خارجية مثل Supabase لتجنب فقدان البيانات نهائياً عند إعادة تشغيل Render.
 conn = sqlite3.connect('study_data.db', check_same_thread=False)
 cursor = conn.cursor()
 
