@@ -1071,7 +1071,7 @@ def main():
   )
   application.add_handler(
       MessageHandler(
-          filters.PHOTO | filters.Document.ALL | filters.Video,
+          filters.PHOTO | filters.Document.ALL | filters.VIDEO,
           handle_photo_document,
       )
   )
