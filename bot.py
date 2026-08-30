@@ -50,7 +50,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- نظام الحماية من السبام وتخزين الذاكرة المؤقتة (Caching) الموسع ---
 user_last_message_time = {}
-SPAM_INTERVAL = 1.5  # الفاصل الزمني بالثواني لمنع السبام
+SPAM_INTERVAL = 0.3  # الفاصل الزمني بالثواني لمنع السبام
 
 
 def check_spam(user_id: int) -> bool:
