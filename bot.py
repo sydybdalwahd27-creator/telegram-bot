@@ -19,7 +19,34 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 from supabase import create_client, Client
 import logging
+from groq import Groq
 
+# تهيئة عميل الذكاء الاصطناعي
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+
+async def handle_ai_chat(update, context):
+  user_message = update.message.text
+  try:
+    chat_completion = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية. تجيب"
+                    " بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية."
+                ),
+            },
+            {"role": "user", "content": user_message},
+        ],
+    )
+    ai_reply = chat_completion.choices[0].message.content
+    await update.message.reply_text(ai_reply)
+  except Exception as e:
+    await update.message.reply_text(
+        "عذراً، حدث خطأ بسيط أثناء معالجة سؤالك العلمي."
+    )
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
@@ -1262,7 +1289,8 @@ def main():
         application.add_handler(CallbackQueryHandler(button_callback))
     
         application.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ai_chat)
+        )
         )
         application.add_handler(
             MessageHandler(
