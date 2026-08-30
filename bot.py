@@ -31,7 +31,17 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+  """Global error handler to prevent bot from crashing."""
+  logger.error("Exception while handling an update:", exc_info=context.error)
 
+  if isinstance(update, Update) and update.effective_message:
+    try:
+      await update.effective_message.reply_text(
+          "Sorry, an unexpected error occurred. Please try again later."
+      )
+    except Exception as e:
+      logger.error(f"Failed to send error message to user: {e}")
 DEVELOPER_USERNAME = "@ota_m_pro"
 ADMIN_ID = 8504617214
 
@@ -1233,11 +1243,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-def main():
-    threading.Thread(target=run_web, daemon=True).start()
-
-    application = ApplicationBuilder().token(BOT_TOKEN).request(HTTPXRequest(connect_timeout=30, read_timeout=30)).build()
-
+def main()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("lessons", lessons_command))
     application.add_handler(CommandHandler("stats", stats))
@@ -1248,7 +1254,7 @@ def main():
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL | filters.VIDEO, handle_photo_document))
-
+    application.add_error_handler(error_handler)
     print("Bot is running...")
     application.run_polling()
 
