@@ -1243,7 +1243,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-def main()
+def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("lessons", lessons_command))
     application.add_handler(CommandHandler("stats", stats))
