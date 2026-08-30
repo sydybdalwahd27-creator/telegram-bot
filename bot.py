@@ -41,7 +41,8 @@ ADMIN_ID = 8504617214
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_API_KEY = (os.environ.get("GROQ_API_KEY") or "").strip()
+GROQ_MODEL = (os.environ.get("GROQ_MODEL") or "llama-3.3-70b-versatile").strip()
 
 if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
@@ -49,7 +50,13 @@ if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
     )
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+groq_client = (
+    Groq(api_key=GROQ_API_KEY, timeout=30.0, max_retries=2)
+    if GROQ_API_KEY
+    else None
+)
+if not groq_client:
+    logger.warning("GROQ_API_KEY is missing; AI service is disabled.")
 
 # ───────────────────────────────────────────────
 # خادم ويب وهمي (للـ Health Check على Render)
@@ -1018,26 +1025,45 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_message = update.message.text
     try:
-        chat_completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية. تجيب"
-                        " بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية."
-                    ),
-                },
-                {"role": "user", "content": user_message},
-            ],
-        )
+        def request_ai_response():
+            return groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية. تجيب"
+                            " بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية."
+                        ),
+                    },
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.7,
+                max_tokens=1024,
+            )
+
+        # مكتبة Groq المتزامنة تُشغّل في thread حتى لا يتوقف البوت أثناء انتظار الرد.
+        chat_completion = await asyncio.to_thread(request_ai_response)
+        if not chat_completion.choices:
+            raise RuntimeError("Groq returned no choices")
+
         ai_reply = chat_completion.choices[0].message.content
+        if not ai_reply:
+            raise RuntimeError("Groq returned an empty response")
+
         await update.message.reply_text(ai_reply)
     except Exception as e:
-        logger.error(f"AI error: {e}")
-        await update.message.reply_text(
-            "عذراً، حدث خطأ بسيط أثناء معالجة سؤالك العلمي."
-        )
+        logger.exception("AI request failed: %s", e)
+        error_code = getattr(e, "status_code", None)
+        if error_code == 401:
+            user_error = "مفتاح GROQ_API_KEY غير صحيح أو منتهي."
+        elif error_code == 429:
+            user_error = "تم تجاوز حد Groq أو الرصيد المتاح مؤقتاً."
+        elif error_code == 404:
+            user_error = f"نموذج الذكاء الاصطناعي غير متاح: {GROQ_MODEL}"
+        else:
+            user_error = "تعذر الاتصال بخدمة الذكاء الاصطناعي حالياً. تحقق من إعدادات Groq وسجل التشغيل."
+        await update.message.reply_text(f"⚠️ {user_error}")
 
 
 # ───────────────────────────────────────────────
