@@ -1244,33 +1244,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
- application = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .request(HTTPXRequest(connect_timeout=30, read_timeout=30))
-        .build()
-    )
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("lessons", lessons_command))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("users", list_all_users))
-    application.add_handler(CommandHandler("broadcast", broadcast_message))
-
-    application.add_handler(CallbackQueryHandler(button_callback))
-
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
-    )
-    application.add_handler(
-        MessageHandler(
-            filters.PHOTO | filters.Document.ALL | filters.VIDEO,
-            handle_photo_document,
+        application = (
+            ApplicationBuilder()
+            .token(BOT_TOKEN)
+            .request(HTTPXRequest(connect_timeout=30, read_timeout=30))
+            .build()
         )
-    )
-
-    # معالج الأخطاء العام
-    application.add_error_handler(error_handler)
-
-    print("Bot is running...")
-    application.run_polling()
+    
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("lessons", lessons_command))
+        application.add_handler(CommandHandler("stats", stats))
+        application.add_handler(CommandHandler("users", list_all_users))
+        application.add_handler(CommandHandler("broadcast", broadcast_message))
+    
+        application.add_handler(CallbackQueryHandler(button_callback))
+    
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
+        )
+        application.add_handler(
+            MessageHandler(
+                filters.PHOTO | filters.Document.ALL | filters.VIDEO,
+                handle_photo_document,
+            )
+        )
+    
+        # معالج الأخطاء العام
+        application.add_error_handler(error_handler)
+    
+        print("Bot is running...")
+        application.run_polling()
+    
+    
+    if __name__ == "__main__":
+        main()
