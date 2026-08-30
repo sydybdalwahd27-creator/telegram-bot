@@ -1,3 +1,4 @@
+
 import os
 import threading
 from flask import Flask
@@ -19,12 +20,13 @@ def run_web():
 DEVELOPER_USERNAME = "@ota_m_pro"
 ADMIN_ID = 8504617214
 
-# الربط بقاعدة بيانات Supabase
+# جلب المتغيرات من البيئة
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("لم يتم العثور على SUPABASE_URL أو SUPABASE_KEY في متغيرات البيئة!")
+if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("يرجى التأكد من ضبط BOT_TOKEN و SUPABASE_URL و SUPABASE_KEY في متغيرات البيئة!")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -32,9 +34,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
     username = f"@{user.username}" if user.username else "بدون يوزر"
-    first_name = user.first_name
+    first_name = user.first_name or "مستخدم"
 
-    # التحقق من وجود المستخدم في Supabase
     res = supabase.table('users').select('welcomed').eq('user_id', user_id).execute()
     data = res.data
 
@@ -64,9 +65,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         supabase.table('users').update({'welcomed': 1}).eq('user_id', user_id).execute()
         welcome_text = (
             f"👋 أهلاً بك يا {first_name} في بوت BAC 2027 المطور!\n\n"
-            "📌 **طريقة استخدام البوت لأول مرة:**\n"
+            "📌 **طريقة استخدام البوت:**\n"
             "• انقر على 'عرض موادي ودروسي' لإدارة جدولك.\n"
-            "• يمكنك إضافة موادك، فروعك، ودروسك بكل سلاسة عبر الأزرار.\n"
+            "• يمكنك إضافة موادك، فروعك، ودروسك بكل سلاسة.\n"
             "• يمكنك إرسال النصوص، الصور، أو ملفات الـ PDF مباشرة.\n\n"
             "اختر من القائمة أدناه للبدء:"
         )
@@ -102,7 +103,7 @@ async def list_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for idx, u in enumerate(users, 1):
             u_id = u.get('user_id')
             username = u.get('username')
-            first_name = u.get('first_name')
+            first_name = u.get('first_name') or "مستخدم"
             user_link = f"[{first_name}](https://t.me/{username.replace('@', '')})" if username and username != "بدون يوزر" else f"{first_name} (بدون معرف)"
             text += f"{idx}. {user_link} — `[ID: {u_id}]`\n"
             if len(text) > 3500:
@@ -142,7 +143,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state_row:
         state = state_row[0].get('state')
-        temp_data = state_row[0].get('temp_data')
+        temp_data = state_row[0].get('temp_data') or ""
 
         if state == "waiting_for_subject":
             sub_name = text
@@ -182,7 +183,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         elif state.startswith("waiting_for_lesson_content_"):
-            parts = state.replace("waiting_for_lesson_content_", "").split("|")
+            parts = state.replace("waiting_for_lesson_content_", "").split("|", 2)
             subject, section, title = parts[0], parts[1], parts[2]
             supabase.table('lessons').insert({
                 'user_id': user_id,
@@ -237,12 +238,12 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
 
     if state_row:
         state = state_row[0].get('state')
-        temp_data = state_row[0].get('temp_data')
+        temp_data = state_row[0].get('temp_data') or ""
 
         if state.startswith("waiting_for_lesson_title_"):
             parts = temp_data.split("|")
             subject, section = parts[0], parts[1]
-            title = update.message.caption if update.message.caption else "صورة الدرس"
+            title = update.message.caption if update.message.caption else "ملف/صورة درس"
             supabase.table('lessons').insert({
                 'user_id': user_id,
                 'subject_name': subject,
@@ -257,7 +258,7 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         elif state.startswith("waiting_for_lesson_content_"):
-            parts = state.replace("waiting_for_lesson_content_", "").split("|")
+            parts = state.replace("waiting_for_lesson_content_", "").split("|", 2)
             subject, section, title = parts[0], parts[1], parts[2]
             supabase.table('lessons').insert({
                 'user_id': user_id,
@@ -285,8 +286,8 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         for item in subjects:
             sub = item.get('subject_name')
             keyboard.append([
-                InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub_{sub}"),
-                InlineKeyboardButton("حذف المادة 🗑️", callback_data=f"del_sub_{sub}")
+                InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub|{sub}"),
+                InlineKeyboardButton("حذف المادة 🗑️", callback_data=f"delsub|{sub}")
             ])
     keyboard.append([InlineKeyboardButton("➕ إضافة مادة جديدة", callback_data="add_subject")])
     keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")])
@@ -310,12 +311,12 @@ async def show_sections_menu_direct(update, context, user_id, subject):
         for item in sections:
             sec = item.get('section_name')
             keyboard.append([
-                InlineKeyboardButton(f"📂 فرع: {sec}", callback_data=f"sec_{subject}_{sec}"),
-                InlineKeyboardButton("حذف الفرع 🗑️", callback_data=f"del_sec_{subject}_{sec}")
+                InlineKeyboardButton(f"📂 فرع: {sec}", callback_data=f"sec|{subject}|{sec}"),
+                InlineKeyboardButton("حذف الفرع 🗑️", callback_data=f"delsec|{subject}|{sec}")
             ])
     else:
         text = f"📚 مادة: {subject}\n❌ أنت لا تملك أي فروع في هذه المادة حالياً."
-    keyboard.append([InlineKeyboardButton("➕ إضافة فرع جديد", callback_data=f"add_sec_{subject}")])
+    keyboard.append([InlineKeyboardButton("➕ إضافة فرع جديد", callback_data=f"addsec|{subject}")])
     keyboard.append([InlineKeyboardButton("🔙 رجوع للمواد", callback_data="show_subjects")])
 
     if update.callback_query:
@@ -336,13 +337,13 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
             c_type = item.get('content_type')
             type_label = "🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝")
             keyboard.append([
-                InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op_{lesson_id}"),
-                InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{lesson_id}")
+                InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op|{lesson_id}"),
+                InlineKeyboardButton("حذف 🗑️", callback_data=f"dl|{lesson_id}")
             ])
     else:
         text = f"📂 مادة: {subject} ➔ فرع: {section}\n❌ أنت لا تملك أي دروس في هذا الفرع."
-    keyboard.append([InlineKeyboardButton("➕ إضافة درس جديد", callback_data=f"add_lesson_{subject}_{section}")])
-    keyboard.append([InlineKeyboardButton("🔙 رجوع للفروع", callback_data=f"sub_{subject}")])
+    keyboard.append([InlineKeyboardButton("➕ إضافة درس جديد", callback_data=f"addles|{subject}|{section}")])
+    keyboard.append([InlineKeyboardButton("🔙 رجوع للفروع", callback_data=f"sub|{subject}")])
 
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -367,42 +368,42 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("✍️ أرسل الآن اسم المادة الجديدة التي تريد إضافتها:")
         return
 
-    if data.startswith("del_sub_"):
-        sub_to_del = data.replace("del_sub_", "", 1)
+    if data.startswith("delsub|"):
+        sub_to_del = data.split("|", 1)[1]
         supabase.table('subjects').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
         supabase.table('sections').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
         supabase.table('lessons').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
         await show_subjects_menu(update, context)
         return
 
-    if data.startswith("sub_"):
-        subject = data.replace("sub_", "", 1)
+    if data.startswith("sub|"):
+        subject = data.split("|", 1)[1]
         await show_sections_menu_direct(update, context, user_id, subject)
         return
 
-    if data.startswith("add_sec_"):
-        subject = data.replace("add_sec_", "", 1)
+    if data.startswith("addsec|"):
+        subject = data.split("|", 1)[1]
         supabase.table('user_states').upsert({'user_id': user_id, 'state': "waiting_for_section", 'temp_data': subject}).execute()
         await query.message.edit_text(f"✍️ أرسل الآن اسم الفرع الجديد الذي تريد إضافته لمادة [{subject}]:")
         return
 
-    if data.startswith("del_sec_"):
-        parts = data.replace("del_sec_", "", 1).split("_", 1)
-        subject, section = parts[0], parts[1]
+    if data.startswith("delsec|"):
+        parts = data.split("|")
+        subject, section = parts[1], parts[2]
         supabase.table('sections').delete().eq('user_id', user_id).eq('subject_name', subject).eq('section_name', section).execute()
         supabase.table('lessons').delete().eq('user_id', user_id).eq('subject_name', subject).eq('section_name', section).execute()
         await show_sections_menu_direct(update, context, user_id, subject)
         return
 
-    if data.startswith("sec_"):
-        parts = data.replace("sec_", "", 1).split("_", 1)
-        subject, section = parts[0], parts[1]
+    if data.startswith("sec|"):
+        parts = data.split("|")
+        subject, section = parts[1], parts[2]
         await show_lessons_menu_direct(update, context, user_id, subject, section)
         return
 
-    if data.startswith("add_lesson_"):
-        parts = data.replace("add_lesson_", "", 1).split("_", 1)
-        subject, section = parts[0], parts[1]
+    if data.startswith("addles|"):
+        parts = data.split("|")
+        subject, section = parts[1], parts[2]
         supabase.table('user_states').upsert({
             'user_id': user_id,
             'state': f"waiting_for_lesson_title_{subject}|{section}",
@@ -411,8 +412,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("✍️ أرسل الآن **عنوان الدرس** الجديد (أو أرسل الصورة/الملف مباشرة):", parse_mode="Markdown")
         return
 
-    if data.startswith("edit_"):
-        lesson_id = int(data.replace("edit_", "", 1))
+    if data.startswith("edit|"):
+        lesson_id = int(data.split("|")[1])
         supabase.table('user_states').upsert({
             'user_id': user_id,
             'state': f"waiting_for_edit_lesson_{lesson_id}",
@@ -421,8 +422,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("✍️ أرسل الآن **اسم الدرس الجديد**:")
         return
 
-    if data.startswith("op_") or data.startswith("dl_"):
-        prefix, lesson_id_str = data.split("_", 1)
+    if data.startswith("op|") or data.startswith("dl|"):
+        prefix, lesson_id_str = data.split("|", 1)
         lesson_id = int(lesson_id_str)
         res = supabase.table('lessons').select('*').eq('id', lesson_id).eq('user_id', user_id).execute()
         
@@ -445,8 +446,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif prefix == "op":
             action_keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("تعديل الاسم ✏️", callback_data=f"edit_{lesson_id}"),
-                    InlineKeyboardButton("حذف الدرس 🗑️", callback_data=f"dl_{lesson_id}")
+                    InlineKeyboardButton("تعديل الاسم ✏️", callback_data=f"edit|{lesson_id}"),
+                    InlineKeyboardButton("حذف الدرس 🗑️", callback_data=f"dl|{lesson_id}")
                 ]
             ])
             if c_type == "text":
@@ -468,7 +469,7 @@ async def post_init(application):
 
 def main():
     request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
-    application = ApplicationBuilder().token("8965186384:AAEadFB6hGmoazwbQsoTe8oTTaUFRSZfIro").request(request).post_init(post_init).build()
+    application = ApplicationBuilder().token(BOT_TOKEN).request(request).post_init(post_init).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("lessons", lessons_command))
