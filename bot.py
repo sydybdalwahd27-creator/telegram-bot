@@ -52,19 +52,21 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # ───────────────────────────────────────────────
-# Flask (للـ Health Check على Render/Railway)
+# خادم ويب وهمي (للـ Health Check على Render)
 # ───────────────────────────────────────────────
-app = Flask(__name__)
+app = Flask('')
 
-
-@app.route("/")
+@app.route('/')
 def home():
-    return "Bot is running 24/7!"
+    return "Bot is running!"
 
-
-def run_web():
+def run():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = threading.Thread(target=run)
+    t.start()
 
 
 # ───────────────────────────────────────────────
@@ -1408,7 +1410,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ───────────────────────────────────────────────
 def main():
     # تشغيل Flask في thread منفصل (للـ Health Check)
-    threading.Thread(target=run_web, daemon=True).start()
+    keep_alive()
 
     application = (
         ApplicationBuilder()
