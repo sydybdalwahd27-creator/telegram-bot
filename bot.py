@@ -1,4 +1,3 @@
-
 import os
 import threading
 from flask import Flask
@@ -68,7 +67,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📌 **طريقة استخدام البوت:**\n"
             "• انقر على 'عرض موادي ودروسي' لإدارة جدولك.\n"
             "• يمكنك إضافة موادك، فروعك، ودروسك بكل سلاسة.\n"
-            "• يمكنك إرسال النصوص، الصور، أو ملفات الـ PDF مباشرة.\n\n"
+            "• يمكنك إرسال النصوص، الصور، الفيديوهات، أو ملفات الـ PDF مباشرة.\n\n"
             "اختر من القائمة أدناه للبدء:"
         )
     else:
@@ -179,7 +178,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'state': f"waiting_for_lesson_content_{subject}|{section}|{title}",
                 'temp_data': title
             }).execute()
-            await update.message.reply_text(f"✍️ أرسل الآن محتوى الدرس '{title}' (أو أرسل صورة/ملف مباشرة):")
+            await update.message.reply_text(f"✍️ أرسل الآن محتوى الدرس '{title}' (أو أرسل صورة/فيديو/ملف مباشرة):")
             return
 
         elif state.startswith("waiting_for_lesson_content_"):
@@ -233,6 +232,9 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
     elif update.message.document:
         file_id = update.message.document.file_id
         c_type = "document"
+    elif update.message.video:
+        file_id = update.message.video.file_id
+        c_type = "video"
     else:
         return
 
@@ -243,7 +245,7 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
         if state.startswith("waiting_for_lesson_title_"):
             parts = temp_data.split("|")
             subject, section = parts[0], parts[1]
-            title = update.message.caption if update.message.caption else "ملف/صورة درس"
+            title = update.message.caption if update.message.caption else "ملف/فيديو/صورة درس"
             supabase.table('lessons').insert({
                 'user_id': user_id,
                 'subject_name': subject,
@@ -253,7 +255,7 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
                 'file_or_text': file_id
             }).execute()
             supabase.table('user_states').delete().eq('user_id', user_id).execute()
-            await update.message.reply_text(f"✅ تم حفظ الملف/الصورة للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
+            await update.message.reply_text(f"✅ تم حفظ الوسائط للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
 
@@ -269,11 +271,11 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
                 'file_or_text': file_id
             }).execute()
             supabase.table('user_states').delete().eq('user_id', user_id).execute()
-            await update.message.reply_text(f"✅ تم حفظ الملف/الصورة للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
+            await update.message.reply_text(f"✅ تم حفظ الوسائط للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
 
-    await update.message.reply_text("⚠️ يرجى استخدام زر 'إضافة درس' من الأزرار التفاعلية قبل إرسال الملفات أو الصور.")
+    await update.message.reply_text("⚠️ يرجى استخدام زر 'إضافة درس' من الأزرار التفاعلية قبل إرسال الملفات، الفيديوهات أو الصور.")
 
 async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
@@ -335,7 +337,7 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
             lesson_id = item.get('id')
             title = item.get('title')
             c_type = item.get('content_type')
-            type_label = "🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝")
+            type_label = "🎥" if c_type == "video" else ("🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝"))
             keyboard.append([
                 InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op|{lesson_id}"),
                 InlineKeyboardButton("حذف 🗑️", callback_data=f"dl|{lesson_id}")
@@ -409,7 +411,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'state': f"waiting_for_lesson_title_{subject}|{section}",
             'temp_data': f"{subject}|{section}"
         }).execute()
-        await query.message.edit_text("✍️ أرسل الآن **عنوان الدرس** الجديد (أو أرسل الصورة/الملف مباشرة):", parse_mode="Markdown")
+        await query.message.edit_text("✍️ أرسل الآن **عنوان الدرس** الجديد (أو أرسل الفيديو/الصورة/الملف مباشرة):", parse_mode="Markdown")
         return
 
     if data.startswith("edit|"):
@@ -456,6 +458,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_photo(chat_id=chat_id, photo=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
             elif c_type == "document":
                 await context.bot.send_document(chat_id=chat_id, document=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
+            elif c_type == "video":
+                await context.bot.send_video(chat_id=chat_id, video=data_val, caption=f"📖 [{subject} / {section}] - {title}", reply_markup=action_keyboard)
 
 async def post_init(application):
     commands = [
@@ -477,7 +481,7 @@ def main():
     application.add_handler(CommandHandler("users", list_all_users))
     application.add_handler(CommandHandler("broadcast", broadcast_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_photo_document))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL | filters.VIDEO, handle_photo_document))
     application.add_handler(CallbackQueryHandler(button_callback))
 
     t = threading.Thread(target=run_web, daemon=True)
