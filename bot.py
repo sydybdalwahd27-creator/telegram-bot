@@ -1,4 +1,3 @@
-from functools import lru_cache
 import os
 import time
 import threading
@@ -100,21 +99,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = f"@{user.username}" if user.username else "بدون يوزر"
     first_name = user.first_name or "مستخدم"
 
-    res = (
-        supabase.table("users")
-        .select("welcomed")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    data = res.data
+    try:
+        res = (
+            supabase.table("users")
+            .select("welcomed")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        data = res.data
+    except Exception:
+        data = []
 
     if not data:
-        supabase.table("users").insert({
-            "user_id": user_id,
-            "username": username,
-            "first_name": first_name,
-            "welcomed": 0,
-        }).execute()
+        try:
+            supabase.table("users").insert({
+                "user_id": user_id,
+                "username": username,
+                "first_name": first_name,
+                "welcomed": 0,
+            }).execute()
+        except Exception:
+            pass
         try:
             admin_msg = f"🔔 عضو جديد انضم للبوت!\n\n👤 الاسم: {first_name}\n🆔 المعرف: {username}\n🔢 الـ ID: `{user_id}`"
             await context.bot.send_message(
@@ -139,9 +144,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if is_first_time:
-        supabase.table("users").update({"welcomed": 1}).eq(
-            "user_id", user_id
-        ).execute()
+        try:
+            supabase.table("users").update({"welcomed": 1}).eq(
+                "user_id", user_id
+            ).execute()
+        except Exception:
+            pass
         welcome_text = (
             f"👋 أهلاً بك يا {first_name} في بوت BAC 2027 المطور!\n\n"
             "📌 **طريقة استخدام البوت:**\n"
@@ -172,8 +180,11 @@ async def lessons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
-        res = supabase.table("users").select("user_id", count="exact").execute()
-        total_users = res.count if res.count is not None else len(res.data)
+        try:
+            res = supabase.table("users").select("user_id", count="exact").execute()
+            total_users = res.count if res.count is not None else len(res.data)
+        except Exception:
+            total_users = 0
         await update.message.reply_text(
             f"📊 إحصائيات البوت:\nعدد الأعضاء المسجلين: {total_users}"
         )
@@ -181,12 +192,15 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
-        res = (
-            supabase.table("users")
-            .select("user_id, username, first_name")
-            .execute()
-        )
-        users = res.data
+        try:
+            res = (
+                supabase.table("users")
+                .select("user_id, username, first_name")
+                .execute()
+            )
+            users = res.data
+        except Exception:
+            users = []
         if not users:
             await update.message.reply_text("لا توجد أي أعضاء مسجلين حتى الآن.")
             return
@@ -219,8 +233,11 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         announcement = " ".join(context.args)
-        res = supabase.table("users").select("user_id").execute()
-        users = res.data
+        try:
+            res = supabase.table("users").select("user_id").execute()
+            users = res.data
+        except Exception:
+            users = []
         success_count = fail_count = 0
         for u in users:
             u_id = u.get("user_id")
@@ -282,15 +299,18 @@ async def show_subject_notes_menu(
     if cache_key in local_cache["notes"]:
         notes = local_cache["notes"][cache_key]
     else:
-        res = (
-            supabase.table("subject_notes")
-            .select("id, note_text")
-            .eq("user_id", user_id)
-            .eq("subject_name", subject)
-            .order("id", desc=True)
-            .execute()
-        )
-        notes = res.data
+        try:
+            res = (
+                supabase.table("subject_notes")
+                .select("id, note_text")
+                .eq("user_id", user_id)
+                .eq("subject_name", subject)
+                .order("id", desc=True)
+                .execute()
+            )
+            notes = res.data
+        except Exception:
+            notes = []
         local_cache["notes"][cache_key] = notes
 
     text = f"📝 **ملاحظات مادة [{subject}]:**\n\n"
@@ -337,16 +357,22 @@ async def show_tasks_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = (
         update.effective_user.id
         if update.effective_user
-        else update.callback_query.from_user.id
+        else (update.callback_query.from_user.id if update.callback_query else None)
     )
-    res = (
-        supabase.table("tasks")
-        .select("id, task_text, is_completed")
-        .eq("user_id", user_id)
-        .order("id", desc=False)
-        .execute()
-    )
-    tasks = res.data
+    if not user_id:
+        return
+
+    try:
+        res = (
+            supabase.table("tasks")
+            .select("id, task_text, is_completed")
+            .eq("user_id", user_id)
+            .order("id", desc=False)
+            .execute()
+        )
+        tasks = res.data
+    except Exception:
+        tasks = []
 
     text = (
         "📅 **قائمة مهامك اليومية:**\n(انقر على المهمة لتغيير حالتها"
@@ -392,13 +418,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
 
-    res = (
-        supabase.table("user_states")
-        .select("state, temp_data")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    state_row = res.data
+    try:
+        res = (
+            supabase.table("user_states")
+            .select("state, temp_data")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        state_row = res.data
+    except Exception:
+        state_row = []
 
     if state_row:
         state = state_row[0].get("state")
@@ -406,55 +435,75 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if state == "waiting_for_subject":
             sub_name = text
-            check = (
-                supabase.table("subjects")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("subject_name", sub_name)
-                .execute()
-            )
+            try:
+                check = (
+                    supabase.table("subjects")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("subject_name", sub_name)
+                    .execute()
+                )
+            except Exception:
+                check = type('obj', (object,), {'data': []})()
+
             if check.data:
                 await update.message.reply_text(
                     f"⚠️ المادة '{sub_name}' موجودة مسبقاً!"
                 )
             else:
-                supabase.table("subjects").insert(
-                    {"user_id": user_id, "subject_name": sub_name}
-                ).execute()
+                try:
+                    supabase.table("subjects").insert(
+                        {"user_id": user_id, "subject_name": sub_name}
+                    ).execute()
+                except Exception:
+                    pass
                 clear_user_cache(user_id)
                 await update.message.reply_text(
                     f"✅ تمت إضافة المادة '{sub_name}' بنجاح!"
                 )
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             await show_subjects_menu(update, context)
             return
 
         elif state == "waiting_for_section":
             subject = temp_data
             sec_name = text
-            check = (
-                supabase.table("sections")
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("subject_name", subject)
-                .eq("section_name", sec_name)
-                .execute()
-            )
+            try:
+                check = (
+                    supabase.table("sections")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("subject_name", subject)
+                    .eq("section_name", sec_name)
+                    .execute()
+                )
+            except Exception:
+                check = type('obj', (object,), {'data': []})()
+
             if check.data:
                 await update.message.reply_text(
                     f"⚠️ الفرع '{sec_name}' موجود مسبقاً في هذه المادة!"
                 )
             else:
-                supabase.table("sections").insert({
-                    "user_id": user_id,
-                    "subject_name": subject,
-                    "section_name": sec_name,
-                }).execute()
+                try:
+                    supabase.table("sections").insert({
+                        "user_id": user_id,
+                        "subject_name": subject,
+                        "section_name": sec_name,
+                    }).execute()
+                except Exception:
+                    pass
                 clear_user_cache(user_id)
                 await update.message.reply_text(
                     f"✅ تم إضافة الفرع '{sec_name}' لمادة [{subject}] بنجاح!"
                 )
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             await show_sections_menu_direct(update, context, user_id, subject)
             return
 
@@ -462,11 +511,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = temp_data.split("|")
             subject, section = parts[0], parts[1]
             title = text
-            supabase.table("user_states").upsert({
-                "user_id": user_id,
-                "state": f"waiting_for_lesson_content_{subject}|{section}|{title}",
-                "temp_data": title,
-            }).execute()
+            try:
+                supabase.table("user_states").upsert({
+                    "user_id": user_id,
+                    "state": f"waiting_for_lesson_content_{subject}|{section}|{title}",
+                    "temp_data": title,
+                }).execute()
+            except Exception:
+                pass
             await update.message.reply_text(
                 f"✍️ أرسل الآن محتوى الدرس '{title}' (أو أرسل صورة/فيديو/ملف مباشرة):"
             )
@@ -475,15 +527,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state.startswith("waiting_for_lesson_content_"):
             parts = state.replace("waiting_for_lesson_content_", "").split("|", 2)
             subject, section, title = parts[0], parts[1], parts[2]
-            supabase.table("lessons").insert({
-                "user_id": user_id,
-                "subject_name": subject,
-                "section_name": section,
-                "title": title,
-                "content_type": "text",
-                "file_or_text": text,
-            }).execute()
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("lessons").insert({
+                    "user_id": user_id,
+                    "subject_name": subject,
+                    "section_name": section,
+                    "title": title,
+                    "content_type": "text",
+                    "file_or_text": text,
+                }).execute()
+            except Exception:
+                pass
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             clear_user_cache(user_id)
             await update.message.reply_text(
                 f"✅ تم حفظ الدرس '{title}' في [{subject} ➔ {section}] بنجاح!"
@@ -494,16 +552,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state.startswith("waiting_for_edit_lesson_"):
             lesson_id = int(state.replace("waiting_for_edit_lesson_", ""))
             new_title = text
-            supabase.table("lessons").update({"title": new_title}).eq(
-                "id", lesson_id
-            ).eq("user_id", user_id).execute()
-            res_lesson = (
-                supabase.table("lessons")
-                .select("subject_name, section_name")
-                .eq("id", lesson_id)
-                .execute()
-            )
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("lessons").update({"title": new_title}).eq(
+                    "id", lesson_id
+                ).eq("user_id", user_id).execute()
+                res_lesson = (
+                    supabase.table("lessons")
+                    .select("subject_name, section_name")
+                    .eq("id", lesson_id)
+                    .execute()
+                )
+            except Exception:
+                res_lesson = type('obj', (object,), {'data': []})()
+
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             clear_user_cache(user_id)
 
             if res_lesson.data:
@@ -520,12 +585,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif state.startswith("waiting_for_sub_note_"):
             subject = state.replace("waiting_for_sub_note_", "")
-            supabase.table("subject_notes").insert({
-                "user_id": user_id,
-                "subject_name": subject,
-                "note_text": text,
-            }).execute()
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("subject_notes").insert({
+                    "user_id": user_id,
+                    "subject_name": subject,
+                    "note_text": text,
+                }).execute()
+            except Exception:
+                pass
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             clear_user_cache(user_id)
             await update.message.reply_text(
                 f"✅ تم حفظ الملاحظة لمادة [{subject}] بنجاح!"
@@ -534,10 +605,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         elif state == "waiting_for_task":
-            supabase.table("tasks").insert(
-                {"user_id": user_id, "task_text": text, "is_completed": False}
-            ).execute()
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("tasks").insert(
+                    {"user_id": user_id, "task_text": text, "is_completed": False}
+                ).execute()
+            except Exception:
+                pass
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             await update.message.reply_text("✅ تم إضافة المهمة بنجاح!")
             await show_tasks_menu(update, context)
             return
@@ -558,13 +635,16 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
     if check_spam(user_id):
         return
 
-    res = (
-        supabase.table("user_states")
-        .select("state, temp_data")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    state_row = res.data
+    try:
+        res = (
+            supabase.table("user_states")
+            .select("state, temp_data")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        state_row = res.data
+    except Exception:
+        state_row = []
 
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
@@ -590,15 +670,21 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
                 if update.message.caption
                 else "ملف/فيديو/صورة درس"
             )
-            supabase.table("lessons").insert({
-                "user_id": user_id,
-                "subject_name": subject,
-                "section_name": section,
-                "title": title,
-                "content_type": c_type,
-                "file_or_text": file_id,
-            }).execute()
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("lessons").insert({
+                    "user_id": user_id,
+                    "subject_name": subject,
+                    "section_name": section,
+                    "title": title,
+                    "content_type": c_type,
+                    "file_or_text": file_id,
+                }).execute()
+            except Exception:
+                pass
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             clear_user_cache(user_id)
             await update.message.reply_text(
                 f"✅ تم حفظ الوسائط للدرس '{title}' في [{subject} ➔ {section}] بنجاح!"
@@ -609,15 +695,21 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
         elif state.startswith("waiting_for_lesson_content_"):
             parts = state.replace("waiting_for_lesson_content_", "").split("|", 2)
             subject, section, title = parts[0], parts[1], parts[2]
-            supabase.table("lessons").insert({
-                "user_id": user_id,
-                "subject_name": subject,
-                "section_name": section,
-                "title": title,
-                "content_type": c_type,
-                "file_or_text": file_id,
-            }).execute()
-            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            try:
+                supabase.table("lessons").insert({
+                    "user_id": user_id,
+                    "subject_name": subject,
+                    "section_name": section,
+                    "title": title,
+                    "content_type": c_type,
+                    "file_or_text": file_id,
+                }).execute()
+            except Exception:
+                pass
+            try:
+                supabase.table("user_states").delete().eq("user_id", user_id).execute()
+            except Exception:
+                pass
             clear_user_cache(user_id)
             await update.message.reply_text(
                 f"✅ تم حفظ الوسائط للدرس '{title}' في [{subject} ➔ {section}] بنجاح!"
@@ -635,19 +727,24 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = (
         update.effective_user.id
         if update.effective_user
-        else update.callback_query.from_user.id
+        else (update.callback_query.from_user.id if update.callback_query else None)
     )
+    if not user_id:
+        return
 
     if user_id in local_cache["subjects"]:
         subjects = local_cache["subjects"][user_id]
     else:
-        res = (
-            supabase.table("subjects")
-            .select("subject_name")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        subjects = res.data
+        try:
+            res = (
+                supabase.table("subjects")
+                .select("subject_name")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            subjects = res.data
+        except Exception:
+            subjects = []
         local_cache["subjects"][user_id] = subjects
 
     text = "📚 قائمة موادي الدراسية:\nاختر المادة لتصفح فروعها، ملاحظاتها أو إدارتها:"
@@ -678,14 +775,17 @@ async def show_sections_menu_direct(update, context, user_id, subject):
     if cache_key in local_cache["sections"]:
         sections = local_cache["sections"][cache_key]
     else:
-        res = (
-            supabase.table("sections")
-            .select("section_name")
-            .eq("user_id", user_id)
-            .eq("subject_name", subject)
-            .execute()
-        )
-        sections = res.data
+        try:
+            res = (
+                supabase.table("sections")
+                .select("section_name")
+                .eq("user_id", user_id)
+                .eq("subject_name", subject)
+                .execute()
+            )
+            sections = res.data
+        except Exception:
+            sections = []
         local_cache["sections"][cache_key] = sections
 
     keyboard = []
@@ -727,15 +827,18 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
     if cache_key in local_cache["lessons"]:
         lessons = local_cache["lessons"][cache_key]
     else:
-        res = (
-            supabase.table("lessons")
-            .select("id, title, content_type")
-            .eq("user_id", user_id)
-            .eq("subject_name", subject)
-            .eq("section_name", section)
-            .execute()
-        )
-        lessons = res.data
+        try:
+            res = (
+                supabase.table("lessons")
+                .select("id, title, content_type")
+                .eq("user_id", user_id)
+                .eq("subject_name", subject)
+                .eq("section_name", section)
+                .execute()
+            )
+            lessons = res.data
+        except Exception:
+            lessons = []
         local_cache["lessons"][cache_key] = lessons
 
     keyboard = []
@@ -801,15 +904,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_subjects_menu(update, context)
         return
     elif data == "main_menu":
-        supabase.table("user_states").delete().eq("user_id", user_id).execute()
+        try:
+            supabase.table("user_states").delete().eq("user_id", user_id).execute()
+        except Exception:
+            pass
         await start(update, context)
         return
     elif data == "add_subject":
-        supabase.table("user_states").upsert({
-            "user_id": user_id,
-            "state": "waiting_for_subject",
-            "temp_data": "",
-        }).execute()
+        try:
+            supabase.table("user_states").upsert({
+                "user_id": user_id,
+                "state": "waiting_for_subject",
+                "temp_data": "",
+            }).execute()
+        except Exception:
+            pass
         await query.message.edit_text(
             "✍️ أرسل الآن اسم المادة الجديدة التي تريد إضافتها:"
         )
@@ -832,11 +941,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("add_sub_note|"):
         subject = data.split("|", 1)[1]
-        supabase.table("user_states").upsert({
-            "user_id": user_id,
-            "state": f"waiting_for_sub_note_{subject}",
-            "temp_data": subject,
-        }).execute()
+        try:
+            supabase.table("user_states").upsert({
+                "user_id": user_id,
+                "state": f"waiting_for_sub_note_{subject}",
+                "temp_data": subject,
+            }).execute()
+        except Exception:
+            pass
         await query.message.edit_text(
             f"✍️ أرسل الآن نص الملاحظة التي تريد إضافتها لمادة [{subject}]:"
         )
@@ -844,13 +956,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("view_sub_note|"):
         n_id = int(data.split("|")[1])
-        res = (
-            supabase.table("subject_notes")
-            .select("note_text, subject_name")
-            .eq("id", n_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
+        try:
+            res = (
+                supabase.table("subject_notes")
+                .select("note_text, subject_name")
+                .eq("id", n_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+        except Exception:
+            res = type('obj', (object,), {'data': []})()
         if res.data:
             note_text = res.data[0].get("note_text")
             sub = res.data[0].get("subject_name")
@@ -870,9 +985,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("|")
         n_id = int(parts[1])
         subject = parts[2]
-        supabase.table("subject_notes").delete().eq("id", n_id).eq(
-            "user_id", user_id
-        ).execute()
+        try:
+            supabase.table("subject_notes").delete().eq("id", n_id).eq(
+                "user_id", user_id
+            ).execute()
+        except Exception:
+            pass
         clear_user_cache(user_id)
         await show_subject_notes_menu(update, context, user_id, subject)
         return
@@ -881,208 +999,257 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_tasks_menu(update, context)
         return
     elif data == "add_task":
-        supabase.table("user_states").upsert({
-            "user_id": user_id,
-            "state": "waiting_for_task",
-            "temp_data": "",
-        }).execute()
+        try:
+            supabase.table("user_states").upsert({
+                "user_id": user_id,
+                "state": "waiting_for_task",
+                "temp_data": "",
+            }).execute()
+        except Exception:
+            pass
         await query.message.edit_text("✍️ أرسل الآن اسم أو نص المهمة الجديدة:")
         return
     elif data.startswith("toggle_task|"):
         t_id = int(data.split("|")[1])
-        res = (
-            supabase.table("tasks")
-            .select("is_completed")
-            .eq("id", t_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
+        try:
+            res = (
+                supabase.table("tasks")
+                .select("is_completed")
+                .eq("id", t_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+        except Exception:
+            res = type('obj', (object,), {'data': []})()
         if res.data:
             current_status = res.data[0].get("is_completed")
-            supabase.table("tasks").update({"is_completed": not current_status}).eq(
-                "id", t_id
-            ).eq("user_id", user_id).execute()
+            try:
+                supabase.table("tasks").update({"is_completed": not current_status}).eq(
+                    "id", t_id
+                ).eq("user_id", user_id).execute()
+            except Exception:
+                pass
             await show_tasks_menu(update, context)
         return
     elif data.startswith("del_task|"):
         t_id = int(data.split("|")[1])
-        supabase.table("tasks").delete().eq("id", t_id).eq(
-            "user_id", user_id
-        ).execute()
+        try:
+            supabase.table("tasks").delete().eq("id", t_id).eq(
+                "user_id", user_id
+            ).execute()
+        except Exception:
+            pass
         await show_tasks_menu(update, context)
         return
 
     if data.startswith("delsub|"):
         sub_to_del = data.split("|", 1)[1]
-        supabase.table("subjects").delete().eq("user_id", user_id).eq(
-            "subject_name", sub_to_del
-        ).execute()
-        supabase.table("sections").delete().eq("user_id", user_id).eq(
-            "subject_name", sub_to_del
-        ).execute()
-        supabase.table("lessons").delete().eq("user_id", user_id).eq(
-            "subject_name", sub_to_del
-        ).execute()
-        supabase.table("subject_notes").delete().eq("user_id", user_id).eq(
-            "subject_name", sub_to_del
-        ).execute()
+        try:
+            supabase.table("subjects").delete().eq("user_id", user_id).eq(
+                "subject_name", sub_to_del
+            ).execute()
+            supabase.table("sections").delete().eq("user_id", user_id).eq(
+                "subject_name", sub_to_del
+            ).execute()
+            supabase.table("lessons").delete().eq("user_id", user_id).eq(
+                "subject_name", sub_to_del
+            ).execute()
+            supabase.table("subject_notes").delete().eq("user_id", user_id).eq(
+                "subject_name", sub_to_del
+            ).execute()
+        except Exception:
+            pass
         clear_user_cache(user_id)
         await show_subjects_menu(update, context)
         return
 
-    if data.startswith("addsec|"):
-        subject = data.split("|", 1)[1]
-        supabase.table("user_states").upsert({
-            "user_id": user_id,
-            "state": "waiting_for_section",
-            "temp_data": subject,
-        }).execute()
-        await query.message.edit_text(
-            f"✍️ أرسل الآن اسم الفرع الجديد الذي تريد إضافته لمادة [{subject}]:"
-        )
-        return
-
     if data.startswith("delsec|"):
         parts = data.split("|")
-        subject, section = parts[1], parts[2]
-        supabase.table("sections").delete().eq("user_id", user_id).eq(
-            "subject_name", subject
-        ).eq("section_name", section).execute()
-        supabase.table("lessons").delete().eq("user_id", user_id).eq(
-            "subject_name", subject
-        ).eq("section_name", section).execute()
+        subject = parts[1]
+        sec_to_del = parts[2]
+        try:
+            supabase.table("sections").delete().eq("user_id", user_id).eq(
+                "subject_name", subject
+            ).eq("section_name", sec_to_del).execute()
+            supabase.table("lessons").delete().eq("user_id", user_id).eq(
+                "subject_name", subject
+            ).eq("section_name", sec_to_del).execute()
+        except Exception:
+            pass
         clear_user_cache(user_id)
         await show_sections_menu_direct(update, context, user_id, subject)
         return
 
     if data.startswith("sec|"):
         parts = data.split("|")
-        subject, section = parts[1], parts[2]
+        subject = parts[1]
+        section = parts[2]
         await show_lessons_menu_direct(update, context, user_id, subject, section)
+        return
+
+    if data.startswith("addsec|"):
+        subject = data.split("|", 1)[1]
+        try:
+            supabase.table("user_states").upsert({
+                "user_id": user_id,
+                "state": "waiting_for_section",
+                "temp_data": subject,
+            }).execute()
+        except Exception:
+            pass
+        await query.message.edit_text(
+            f"✍️ أرسل الآن اسم الفرع الجديد الذي تريد إضافته لمادة [{subject}]:"
+        )
         return
 
     if data.startswith("addles|"):
         parts = data.split("|")
-        subject, section = parts[1], parts[2]
-        supabase.table("user_states").upsert({
-            "user_id": user_id,
-            "state": f"waiting_for_lesson_title_{subject}|{section}",
-            "temp_data": f"{subject}|{section}",
-        }).execute()
+        subject = parts[1]
+        section = parts[2]
+        try:
+            supabase.table("user_states").upsert({
+                "user_id": user_id,
+                "state": f"waiting_for_lesson_title_{subject}|{section}",
+                "temp_data": f"{subject}|{section}",
+            }).execute()
+        except Exception:
+            pass
         await query.message.edit_text(
-            "✍️ أرسل الآن **عنوان الدرس** الجديد (أو أرسل الفيديو/الصورة/الملف"
-            " مباشرة):",
+            f"✍️ أرسل الآن **عنوان الدرس** الجديد في [{subject} ➔ {section}]:",
             parse_mode="Markdown",
         )
         return
 
-    if data.startswith("edit|"):
+    if data.startswith("op|"):
         lesson_id = int(data.split("|")[1])
-        supabase.table("user_states").upsert({
-            "user_id": user_id,
-            "state": f"waiting_for_edit_lesson_{lesson_id}",
-            "temp_data": "",
-        }).execute()
-        await query.message.reply_text("✍️ أرسل الآن **اسم الدرس الجديد**:")
+        try:
+            res = (
+                supabase.table("lessons")
+                .select("title, content_type, file_or_text, subject_name, section_name")
+                .eq("id", lesson_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+        except Exception:
+            res = type('obj', (object,), {'data': []})()
+        if res.data:
+            lesson = res.data[0]
+            title = lesson.get("title")
+            c_type = lesson.get("content_type")
+            content = lesson.get("file_or_text")
+            subject = lesson.get("subject_name")
+            section = lesson.get("section_name")
+
+            kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "✏️ تعديل اسم الدرس", callback_data=f"edit_lesson|{lesson_id}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🔙 رجوع للدروس", callback_data=f"sec|{subject}|{section}"
+                    )
+                ],
+            ])
+
+            if c_type == "text":
+                await query.message.edit_text(
+                    f"📖 **الدرس: {title}**\n\n{content}",
+                    reply_markup=kb,
+                    parse_mode="Markdown",
+                )
+            elif c_type == "photo":
+                await query.message.delete()
+                await context.bot.send_photo(
+                    chat_id=user_id,
+                    photo=content,
+                    caption=f"📖 **الدرس: {title}**",
+                    reply_markup=kb,
+                    parse_mode="Markdown",
+                )
+            elif c_type == "video":
+                await query.message.delete()
+                await context.bot.send_video(
+                    chat_id=user_id,
+                    video=content,
+                    caption=f"📖 **الدرس: {title}**",
+                    reply_markup=kb,
+                    parse_mode="Markdown",
+                )
+            elif c_type == "document":
+                await query.message.delete()
+                await context.bot.send_document(
+                    chat_id=user_id,
+                    document=content,
+                    caption=f"📖 **الدرس: {title}**",
+                    reply_markup=kb,
+                    parse_mode="Markdown",
+                )
         return
 
-    if data.startswith("op|") or data.startswith("dl|"):
-        prefix, lesson_id_str = data.split("|", 1)
-        lesson_id = int(lesson_id_str)
-        res = (
-            supabase.table("lessons")
-            .select("*")
-            .eq("id", lesson_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-
-        if not res.data:
-            await query.message.reply_text("❌ عذراً، لم يتم العثور على العنصر.")
-            return
-
-        row = res.data[0]
-        subject = row.get("subject_name")
-        section = row.get("section_name")
-        title = row.get("title")
-        c_type = row.get("content_type")
-        data_val = row.get("file_or_text")
-        chat_id = query.message.chat_id
-
-        if prefix == "dl":
+    if data.startswith("dl|"):
+        lesson_id = int(data.split("|")[1])
+        try:
+            res = (
+                supabase.table("lessons")
+                .select("subject_name, section_name")
+                .eq("id", lesson_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+        except Exception:
+            res = type('obj', (object,), {'data': []})()
+        sub = sec = None
+        if res.data:
+            sub = res.data[0].get("subject_name")
+            sec = res.data[0].get("section_name")
+        try:
             supabase.table("lessons").delete().eq("id", lesson_id).eq(
                 "user_id", user_id
             ).execute()
-            clear_user_cache(user_id)
-            await query.message.reply_text(f"❌ تم حذف الدرس '{title}' بنجاح.")
-            await show_lessons_menu_direct(update, context, user_id, subject, section)
-        elif prefix == "op":
-            action_keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("تعديل الاسم ✏️", callback_data=f"edit|{lesson_id}"),
-                InlineKeyboardButton(
-                    "حذف الدرس 🗑️", callback_data=f"dl|{lesson_id}"
-                ),
-            ]])
-            if c_type == "text":
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"📖 [{subject} / {section}] - {title}:\n\n{data_val}",
-                    reply_markup=action_keyboard,
-                )
-            elif c_type == "photo":
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=data_val,
-                    caption=f"📖 [{subject} / {section}] - {title}",
-                    reply_markup=action_keyboard,
-                )
-            elif c_type == "document":
-                await context.bot.send_document(
-                    chat_id=chat_id,
-                    document=data_val,
-                    caption=f"📖 [{subject} / {section}] - {title}",
-                    reply_markup=action_keyboard,
-                )
-            elif c_type == "video":
-                await context.bot.send_video(
-                    chat_id=chat_id,
-                    video=data_val,
-                    caption=f"📖 [{subject} / {section}] - {title}",
-                    reply_markup=action_keyboard,
-                )
+        except Exception:
+            pass
+        clear_user_cache(user_id)
+        if sub and sec:
+            await show_lessons_menu_direct(update, context, user_id, sub, sec)
+        else:
+            await show_subjects_menu(update, context)
+        return
+
+    if data.startswith("edit_lesson|"):
+        lesson_id = int(data.split("|")[1])
+        try:
+            supabase.table("user_states").upsert({
+                "user_id": user_id,
+                "state": f"waiting_for_edit_lesson_{lesson_id}",
+                "temp_data": str(lesson_id),
+            }).execute()
+        except Exception:
+            pass
+        await query.message.edit_text(
+            "✍️ أرسل الآن الاسم أو العنوان الجديد للدرس:"
+        )
+        return
 
 
 def main():
-    request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0)
-    application = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .request(request)
-        .build()
-    )
+    threading.Thread(target=run_web, daemon=True).start()
+
+    application = ApplicationBuilder().token(BOT_TOKEN).request(HTTPXRequest(connect_timeout=30, read_timeout=30)).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("lessons", lessons_command))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("users", list_all_users))
     application.add_handler(CommandHandler("broadcast", broadcast_message))
-    application.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND, handle_text
-        )
-    )
-    application.add_handler(
-        MessageHandler(
-            filters.PHOTO | filters.Document.ALL | filters.VIDEO,
-            handle_photo_document,
-        )
-    )
+
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    t = threading.Thread(target=run_web, daemon=True)
-    t.start()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.DOCUMENT | filters.VIDEO, handle_photo_document))
 
-    print("Bot is starting with polling...")
+    print("Bot is running...")
     application.run_polling()
 
 
