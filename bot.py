@@ -18,7 +18,9 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 from supabase import create_client, Client
+import logging
 
+logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 
