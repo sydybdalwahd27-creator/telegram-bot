@@ -305,7 +305,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /lessons — عرض موادك ودروسك\n"
         "• /tasks — المهام اليومية\n"
         "• يمكنك إرسال أي سؤال علمي وسيجيبك الذكاء الاصطناعي 📚\n\n"
-        f"للتواصل: {DEVELOPER_USERNAME}"
+        f"للتواصل: {ota_m_pro}"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
