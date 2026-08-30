@@ -29,6 +29,7 @@ if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# --- القائمة الرئيسية ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -56,6 +57,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("📚 عرض موادي ودروسي", callback_data="show_subjects")],
+        [InlineKeyboardButton("📅 المهام اليومية", callback_data="show_tasks")],
         [InlineKeyboardButton("💬 مراسلة المطور", url=f"https://t.me/{DEVELOPER_USERNAME.replace('@', '')}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -65,15 +67,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         welcome_text = (
             f"👋 أهلاً بك يا {first_name} في بوت BAC 2027 المطور!\n\n"
             "📌 **طريقة استخدام البوت:**\n"
-            "• انقر على 'عرض موادي ودروسي' لإدارة جدولك.\n"
-            "• يمكنك إضافة موادك، فروعك، ودروسك بكل سلاسة.\n"
-            "• يمكنك إرسال النصوص، الصور، الفيديوهات، أو ملفات الـ PDF مباشرة.\n\n"
+            "• انقر على 'عرض موادي ودروسي' لإدارة جدولك، دروسك، وملاحظات كل مادة.\n"
+            "• تنظيم خطتك ودراستك اليومية عبر 'المهام اليومية'.\n\n"
             "اختر من القائمة أدناه للبدء:"
         )
     else:
         welcome_text = (
             f"👋 أهلاً بك مجدداً يا {first_name}!\n\n"
-            "مساحتك الشخصية لتنظيم دروسك عبر الأزرار التفاعلية للمواد والفروع 📚✨.\n"
+            "مساحتك الشخصية لتنظيم دروسك، مهامك اليومية، وملاحظات موادك 📚✨.\n"
             "اختر من القائمة أدناه:"
         )
 
@@ -133,6 +134,80 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("هذا الأمر مخصص للمطور فقط ❌")
 
+# --- قائمة تفاصيل المادة الخيارات (فروع / ملاحظات) ---
+async def show_subject_options(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, subject: str):
+    text = f"📖 **مادة: {subject}**\nاختر القسم الذي تريد تصفحه أو إدارته:"
+    keyboard = [
+        [InlineKeyboardButton("📂 الفروع والدروس", callback_data=f"show_sec_list|{subject}")],
+        [InlineKeyboardButton("📝 ملاحظات هذه المادة", callback_data=f"show_sub_notes|{subject}")],
+        [InlineKeyboardButton("حذف المادة 🗑️", callback_data=f"delsub|{subject}")],
+        [InlineKeyboardButton("🔙 رجوع للمواد", callback_data="show_subjects")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.callback_query:
+        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+
+# --- عرض ملاحظات المادة الخاصة ---
+async def show_subject_notes_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, subject: str):
+    res = supabase.table('subject_notes').select('id, note_text').eq('user_id', user_id).eq('subject_name', subject).order('id', desc=True).execute()
+    notes = res.data
+
+    text = f"📝 **ملاحظات مادة [{subject}]:**\n\n"
+    keyboard = []
+    if notes:
+        for n in notes:
+            n_id = n.get('id')
+            n_text = n.get('note_text')
+            display_text = n_text[:25] + "..." if len(n_text) > 25 else n_text
+            keyboard.append([
+                InlineKeyboardButton(f"📌 {display_text}", callback_data=f"view_sub_note|{n_id}"),
+                InlineKeyboardButton("حذف 🗑️", callback_data=f"del_sub_note|{n_id}|{subject}")
+            ])
+    else:
+        text += "لا توجد أي ملاحظات محفوظة لهذه المادة حالياً."
+
+    keyboard.append([InlineKeyboardButton("➕ إضافة ملاحظة للمادة", callback_data=f"add_sub_note|{subject}")])
+    keyboard.append([InlineKeyboardButton("🔙 رجوع خيارات المادة", callback_data=f"sub|{subject}")])
+
+    if update.callback_query:
+        await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+# --- إدارة المهام اليومية ---
+async def show_tasks_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
+    res = supabase.table('tasks').select('id, task_text, is_completed').eq('user_id', user_id).order('id', desc=False).execute()
+    tasks = res.data
+
+    text = "📅 **قائمة مهامك اليومية:**\n(انقر على المهمة لتغيير حالتها مكتملة/غير مكتملة)\n\n"
+    keyboard = []
+    if tasks:
+        for t in tasks:
+            t_id = t.get('id')
+            t_text = t.get('task_text')
+            is_done = t.get('is_completed')
+            status_icon = "✅" if is_done else "❌"
+            
+            keyboard.append([
+                InlineKeyboardButton(f"{status_icon} {t_text}", callback_data=f"toggle_task|{t_id}"),
+                InlineKeyboardButton("🗑️", callback_data=f"del_task|{t_id}")
+            ])
+    else:
+        text += "لا توجد مهام يومية حالياً."
+
+    keyboard.append([InlineKeyboardButton("➕ إضافة مهمة جديدة", callback_data="add_task")])
+    keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")])
+
+    if update.callback_query:
+        await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+# --- معالجة الرسائل النصية والمدخلات ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
@@ -214,6 +289,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await show_subjects_menu(update, context)
             return
 
+        elif state.startswith("waiting_for_sub_note_"):
+            subject = state.replace("waiting_for_sub_note_", "")
+            supabase.table('subject_notes').insert({'user_id': user_id, 'subject_name': subject, 'note_text': text}).execute()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
+            await update.message.reply_text(f"✅ تم حفظ الملاحظة لمادة [{subject}] بنجاح!")
+            await show_subject_notes_menu(update, context, user_id, subject)
+            return
+
+        elif state == "waiting_for_task":
+            supabase.table('tasks').insert({'user_id': user_id, 'task_text': text, 'is_completed': False}).execute()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
+            await update.message.reply_text("✅ تم إضافة المهمة بنجاح!")
+            await show_tasks_menu(update, context)
+            return
+
     list_keywords = ["قائمة", "اعرض", "اضهر", "أضهر", "دروسي", "الدروس", "موادي"]
     if any(keyword in text for keyword in list_keywords):
         await show_subjects_menu(update, context)
@@ -282,14 +372,13 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     res = supabase.table('subjects').select('subject_name').eq('user_id', user_id).execute()
     subjects = res.data
 
-    text = "📚 قائمة موادي الدراسية:\nاختر المادة لتصفح فروعها ودروسها أو إدارتها:"
+    text = "📚 قائمة موادي الدراسية:\nاختر المادة لتصفح فروعها، ملاحظاتها أو إدارتها:"
     keyboard = []
     if subjects:
         for item in subjects:
             sub = item.get('subject_name')
             keyboard.append([
-                InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub|{sub}"),
-                InlineKeyboardButton("حذف المادة 🗑️", callback_data=f"delsub|{sub}")
+                InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub|{sub}")
             ])
     keyboard.append([InlineKeyboardButton("➕ إضافة مادة جديدة", callback_data="add_subject")])
     keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")])
@@ -319,7 +408,7 @@ async def show_sections_menu_direct(update, context, user_id, subject):
     else:
         text = f"📚 مادة: {subject}\n❌ أنت لا تملك أي فروع في هذه المادة حالياً."
     keyboard.append([InlineKeyboardButton("➕ إضافة فرع جديد", callback_data=f"addsec|{subject}")])
-    keyboard.append([InlineKeyboardButton("🔙 رجوع للمواد", callback_data="show_subjects")])
+    keyboard.append([InlineKeyboardButton("🔙 رجوع خيارات المادة", callback_data=f"sub|{subject}")])
 
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -345,13 +434,14 @@ async def show_lessons_menu_direct(update, context, user_id, subject, section):
     else:
         text = f"📂 مادة: {subject} ➔ فرع: {section}\n❌ أنت لا تملك أي دروس في هذا الفرع."
     keyboard.append([InlineKeyboardButton("➕ إضافة درس جديد", callback_data=f"addles|{subject}|{section}")])
-    keyboard.append([InlineKeyboardButton("🔙 رجوع للفروع", callback_data=f"sub|{subject}")])
+    keyboard.append([InlineKeyboardButton("🔙 رجوع للفروع", callback_data=f"show_sec_list|{subject}")])
 
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+# --- معالجة ضغطات الأزرار ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -363,24 +453,84 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif data == "main_menu":
         supabase.table('user_states').delete().eq('user_id', user_id).execute()
-        await query.message.edit_text("🏠 القائمة الرئيسية للبوت. اضغط /start للبدء من جديد.")
+        await start(update, context)
         return
     elif data == "add_subject":
         supabase.table('user_states').upsert({'user_id': user_id, 'state': "waiting_for_subject", 'temp_data': ""}).execute()
         await query.message.edit_text("✍️ أرسل الآن اسم المادة الجديدة التي تريد إضافتها:")
         return
 
+    # أحداث تفاصيل المادة
+    if data.startswith("sub|"):
+        subject = data.split("|", 1)[1]
+        await show_subject_options(update, context, user_id, subject)
+        return
+
+    if data.startswith("show_sec_list|"):
+        subject = data.split("|", 1)[1]
+        await show_sections_menu_direct(update, context, user_id, subject)
+        return
+
+    # ملاحظات المادة المخصصة
+    if data.startswith("show_sub_notes|"):
+        subject = data.split("|", 1)[1]
+        await show_subject_notes_menu(update, context, user_id, subject)
+        return
+
+    if data.startswith("add_sub_note|"):
+        subject = data.split("|", 1)[1]
+        supabase.table('user_states').upsert({'user_id': user_id, 'state': f"waiting_for_sub_note_{subject}", 'temp_data': subject}).execute()
+        await query.message.edit_text(f"✍️ أرسل الآن نص الملاحظة التي تريد إضافتها لمادة [{subject}]:")
+        return
+
+    if data.startswith("view_sub_note|"):
+        n_id = int(data.split("|")[1])
+        res = supabase.table('subject_notes').select('note_text, subject_name').eq('id', n_id).eq('user_id', user_id).execute()
+        if res.data:
+            note_text = res.data[0].get('note_text')
+            sub = res.data[0].get('subject_name')
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع لملاحظات المادة", callback_data=f"show_sub_notes|{sub}")]])
+            await query.message.edit_text(f"📝 **ملاحظة [{sub}]:**\n\n{note_text}", reply_markup=kb, parse_mode="Markdown")
+        return
+
+    if data.startswith("del_sub_note|"):
+        parts = data.split("|")
+        n_id = int(parts[1])
+        subject = parts[2]
+        supabase.table('subject_notes').delete().eq('id', n_id).eq('user_id', user_id).execute()
+        await show_subject_notes_menu(update, context, user_id, subject)
+        return
+
+    # أحداث المهام اليومية
+    if data == "show_tasks":
+        await show_tasks_menu(update, context)
+        return
+    elif data == "add_task":
+        supabase.table('user_states').upsert({'user_id': user_id, 'state': "waiting_for_task", 'temp_data': ""}).execute()
+        await query.message.edit_text("✍️ أرسل الآن اسم أو نص المهمة الجديدة:")
+        return
+    elif data.startswith("toggle_task|"):
+        t_id = int(data.split("|")[1])
+        res = supabase.table('tasks').select('is_completed').eq('id', t_id).eq('user_id', user_id).execute()
+        if res.data:
+            current_status = res.data[0].get('is_completed')
+            supabase.table('tasks').update({'is_completed': not current_status}).eq('id', t_id).eq('user_id', user_id).execute()
+            await show_tasks_menu(update, context)
+        return
+    elif data.startswith("del_task|"):
+        t_id = int(data.split("|")[1])
+        supabase.table('tasks').delete().eq('id', t_id).eq('user_id', user_id).execute()
+        await show_tasks_menu(update, context)
+        return
+
+    # معالجة الفروع والدروس
     if data.startswith("delsub|"):
         sub_to_del = data.split("|", 1)[1]
         supabase.table('subjects').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
         supabase.table('sections').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
         supabase.table('lessons').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
+        supabase.table('subject_notes').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
         await show_subjects_menu(update, context)
-        return
-
-    if data.startswith("sub|"):
-        subject = data.split("|", 1)[1]
-        await show_sections_menu_direct(update, context, user_id, subject)
         return
 
     if data.startswith("addsec|"):
