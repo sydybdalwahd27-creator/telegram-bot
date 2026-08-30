@@ -1247,7 +1247,7 @@ def main():
     application.add_handler(CallbackQueryHandler(button_callback))
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    application.add_handler(MessageHandler(filters.PHOTO | filters.DOCUMENT | filters.VIDEO, handle_photo_document))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL | filters.VIDEO, handle_photo_document))
 
     print("Bot is running...")
     application.run_polling()
