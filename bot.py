@@ -1,11 +1,10 @@
-
 import os
 import threading
-import sqlite3
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
+from supabase import create_client, Client
 
 app = Flask(__name__)
 
@@ -20,53 +19,14 @@ def run_web():
 DEVELOPER_USERNAME = "@ota_m_pro"
 ADMIN_ID = 8504617214
 
-# استخدام مجلد مؤقت أو مسار ثابت إذا كان مدعوماً، ولكن يفضل دائماً ربط قاعدة بيانات خارجية مثل Supabase لتجنب فقدان البيانات نهائياً عند إعادة تشغيل Render.
-conn = sqlite3.connect('study_data.db', check_same_thread=False)
-cursor = conn.cursor()
+# الربط بقاعدة بيانات Supabase
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS subjects (
-        user_id INTEGER,
-        subject_name TEXT
-    )
-''')
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("لم يتم العثور على SUPABASE_URL أو SUPABASE_KEY في متغيرات البيئة!")
 
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS sections (
-        user_id INTEGER,
-        subject_name TEXT,
-        section_name TEXT
-    )
-''')
-
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS lessons (
-        user_id INTEGER,
-        subject_name TEXT,
-        section_name TEXT,
-        title TEXT,
-        content_type TEXT,
-        file_or_text TEXT
-    )
-''')
-
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        first_name TEXT,
-        welcomed INTEGER DEFAULT 0
-    )
-''')
-
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS user_states (
-        user_id INTEGER PRIMARY KEY,
-        state TEXT,
-        temp_data TEXT
-    )
-''')
-conn.commit()
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -74,12 +34,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = f"@{user.username}" if user.username else "بدون يوزر"
     first_name = user.first_name
 
-    cursor.execute("SELECT welcomed FROM users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
+    # التحقق من وجود المستخدم في Supabase
+    res = supabase.table('users').select('welcomed').eq('user_id', user_id).execute()
+    data = res.data
 
-    if not row:
-        cursor.execute("INSERT INTO users VALUES (?, ?, ?, 0)", (user_id, username, first_name))
-        conn.commit()
+    if not data:
+        supabase.table('users').insert({
+            'user_id': user_id,
+            'username': username,
+            'first_name': first_name,
+            'welcomed': 0
+        }).execute()
         try:
             admin_msg = f"🔔 عضو جديد انضم للبوت!\n\n👤 الاسم: {first_name}\n🆔 المعرف: {username}\n🔢 الـ ID: `{user_id}`"
             await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown")
@@ -87,7 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         is_first_time = True
     else:
-        is_first_time = (row[0] == 0)
+        is_first_time = (data[0].get('welcomed') == 0)
 
     keyboard = [
         [InlineKeyboardButton("📚 عرض موادي ودروسي", callback_data="show_subjects")],
@@ -96,8 +61,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if is_first_time:
-        cursor.execute("UPDATE users SET welcomed = 1 WHERE user_id = ?", (user_id,))
-        conn.commit()
+        supabase.table('users').update({'welcomed': 1}).eq('user_id', user_id).execute()
         welcome_text = (
             f"👋 أهلاً بك يا {first_name} في بوت BAC 2027 المطور!\n\n"
             "📌 **طريقة استخدام البوت لأول مرة:**\n"
@@ -123,19 +87,22 @@ async def lessons_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
+        res = supabase.table('users').select('user_id', count='exact').execute()
+        total_users = res.count if res.count is not None else len(res.data)
         await update.message.reply_text(f"📊 إحصائيات البوت:\nعدد الأعضاء المسجلين: {total_users}")
 
 async def list_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
-        cursor.execute("SELECT user_id, username, first_name FROM users")
-        users = cursor.fetchall()
+        res = supabase.table('users').select('user_id, username, first_name').execute()
+        users = res.data
         if not users:
             await update.message.reply_text("لا توجد أي أعضاء مسجلين حتى الآن.")
             return
         text = "👥 قائمة الأعضاء المسجلين في البوت:\n\n"
-        for idx, (u_id, username, first_name) in enumerate(users, 1):
+        for idx, u in enumerate(users, 1):
+            u_id = u.get('user_id')
+            username = u.get('username')
+            first_name = u.get('first_name')
             user_link = f"[{first_name}](https://t.me/{username.replace('@', '')})" if username and username != "بدون يوزر" else f"{first_name} (بدون معرف)"
             text += f"{idx}. {user_link} — `[ID: {u_id}]`\n"
             if len(text) > 3500:
@@ -152,10 +119,11 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ يرجى كتابة النص بعد الأمر هكذا:\n`/broadcast [الرسالة]`", parse_mode="Markdown")
             return
         announcement = " ".join(context.args)
-        cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
+        res = supabase.table('users').select('user_id').execute()
+        users = res.data
         success_count = fail_count = 0
-        for (u_id,) in users:
+        for u in users:
+            u_id = u.get('user_id')
             try:
                 await context.bot.send_message(chat_id=u_id, text=announcement, parse_mode="Markdown")
                 success_count += 1
@@ -168,68 +136,77 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    cursor.execute("SELECT state, temp_data FROM user_states WHERE user_id = ?", (user_id,))
-    state_row = cursor.fetchone()
+    
+    res = supabase.table('user_states').select('state, temp_data').eq('user_id', user_id).execute()
+    state_row = res.data
 
     if state_row:
-        state, temp_data = state_row[0], state_row[1]
+        state = state_row[0].get('state')
+        temp_data = state_row[0].get('temp_data')
+
         if state == "waiting_for_subject":
             sub_name = text
-            cursor.execute("SELECT * FROM subjects WHERE user_id = ? AND subject_name = ?", (user_id, sub_name))
-            if cursor.fetchone():
+            check = supabase.table('subjects').select('*').eq('user_id', user_id).eq('subject_name', sub_name).execute()
+            if check.data:
                 await update.message.reply_text(f"⚠️ المادة '{sub_name}' موجودة مسبقاً!")
             else:
-                cursor.execute("INSERT INTO subjects VALUES (?, ?)", (user_id, sub_name))
-                conn.commit()
+                supabase.table('subjects').insert({'user_id': user_id, 'subject_name': sub_name}).execute()
                 await update.message.reply_text(f"✅ تمت إضافة المادة '{sub_name}' بنجاح!")
-            cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
-            conn.commit()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
             await show_subjects_menu(update, context)
             return
+
         elif state == "waiting_for_section":
             subject = temp_data
             sec_name = text
-            cursor.execute("SELECT * FROM sections WHERE user_id = ? AND subject_name = ? AND section_name = ?", (user_id, subject, sec_name))
-            if cursor.fetchone():
+            check = supabase.table('sections').select('*').eq('user_id', user_id).eq('subject_name', subject).eq('section_name', sec_name).execute()
+            if check.data:
                 await update.message.reply_text(f"⚠️ الفرع '{sec_name}' موجود مسبقاً في هذه المادة!")
             else:
-                cursor.execute("INSERT INTO sections VALUES (?, ?, ?)", (user_id, subject, sec_name))
-                conn.commit()
+                supabase.table('sections').insert({'user_id': user_id, 'subject_name': subject, 'section_name': sec_name}).execute()
                 await update.message.reply_text(f"✅ تم إضافة الفرع '{sec_name}' لمادة [{subject}] بنجاح!")
-            cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
-            conn.commit()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
             await show_sections_menu_direct(update, context, user_id, subject)
             return
+
         elif state.startswith("waiting_for_lesson_title_"):
             parts = temp_data.split("|")
             subject, section = parts[0], parts[1]
             title = text
-            cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", 
-                           (user_id, f"waiting_for_lesson_content_{subject}|{section}|{title}", title))
-            conn.commit()
+            supabase.table('user_states').upsert({
+                'user_id': user_id,
+                'state': f"waiting_for_lesson_content_{subject}|{section}|{title}",
+                'temp_data': title
+            }).execute()
             await update.message.reply_text(f"✍️ أرسل الآن محتوى الدرس '{title}' (أو أرسل صورة/ملف مباشرة):")
             return
+
         elif state.startswith("waiting_for_lesson_content_"):
             parts = state.replace("waiting_for_lesson_content_", "").split("|")
             subject, section, title = parts[0], parts[1], parts[2]
-            cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, "text", text))
-            conn.commit()
-            cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
-            conn.commit()
+            supabase.table('lessons').insert({
+                'user_id': user_id,
+                'subject_name': subject,
+                'section_name': section,
+                'title': title,
+                'content_type': 'text',
+                'file_or_text': text
+            }).execute()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
             await update.message.reply_text(f"✅ تم حفظ الدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
+
         elif state.startswith("waiting_for_edit_lesson_"):
-            rowid = state.replace("waiting_for_edit_lesson_", "")
+            lesson_id = int(state.replace("waiting_for_edit_lesson_", ""))
             new_title = text
-            cursor.execute("UPDATE lessons SET title = ? WHERE rowid = ? AND user_id = ?", (new_title, rowid, user_id))
-            conn.commit()
-            cursor.execute("SELECT subject_name, section_name FROM lessons WHERE rowid = ?", (rowid,))
-            res = cursor.fetchone()
-            cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
-            conn.commit()
-            if res:
-                sub, sec = res[0], res[1]
+            supabase.table('lessons').update({'title': new_title}).eq('id', lesson_id).eq('user_id', user_id).execute()
+            res_lesson = supabase.table('lessons').select('subject_name, section_name').eq('id', lesson_id).execute()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
+            
+            if res_lesson.data:
+                sub = res_lesson.data[0].get('subject_name')
+                sec = res_lesson.data[0].get('section_name')
                 await update.message.reply_text(f"✅ تم تعديل اسم الدرس بنجاح إلى: '{new_title}'")
                 await show_lessons_menu_direct(update, context, user_id, sub, sec)
             else:
@@ -246,8 +223,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    cursor.execute("SELECT state, temp_data FROM user_states WHERE user_id = ?", (user_id,))
-    state_row = cursor.fetchone()
+    res = supabase.table('user_states').select('state, temp_data').eq('user_id', user_id).execute()
+    state_row = res.data
 
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
@@ -259,25 +236,38 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if state_row:
-        state, temp_data = state_row[0], state_row[1]
+        state = state_row[0].get('state')
+        temp_data = state_row[0].get('temp_data')
+
         if state.startswith("waiting_for_lesson_title_"):
             parts = temp_data.split("|")
             subject, section = parts[0], parts[1]
             title = update.message.caption if update.message.caption else "صورة الدرس"
-            cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, c_type, file_id))
-            conn.commit()
-            cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
-            conn.commit()
-            await update.message.reply_text(f"✅ تم حفظ الصورة للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
+            supabase.table('lessons').insert({
+                'user_id': user_id,
+                'subject_name': subject,
+                'section_name': section,
+                'title': title,
+                'content_type': c_type,
+                'file_or_text': file_id
+            }).execute()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
+            await update.message.reply_text(f"✅ تم حفظ الملف/الصورة للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
+
         elif state.startswith("waiting_for_lesson_content_"):
             parts = state.replace("waiting_for_lesson_content_", "").split("|")
             subject, section, title = parts[0], parts[1], parts[2]
-            cursor.execute("INSERT INTO lessons VALUES (?, ?, ?, ?, ?, ?)", (user_id, subject, section, title, c_type, file_id))
-            conn.commit()
-            cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
-            conn.commit()
+            supabase.table('lessons').insert({
+                'user_id': user_id,
+                'subject_name': subject,
+                'section_name': section,
+                'title': title,
+                'content_type': c_type,
+                'file_or_text': file_id
+            }).execute()
+            supabase.table('user_states').delete().eq('user_id', user_id).execute()
             await update.message.reply_text(f"✅ تم حفظ الملف/الصورة للدرس '{title}' في [{subject} ➔ {section}] بنجاح!")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
             return
@@ -286,12 +276,14 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
-    cursor.execute("SELECT subject_name FROM subjects WHERE user_id = ?", (user_id,))
-    subjects = cursor.fetchall()
+    res = supabase.table('subjects').select('subject_name').eq('user_id', user_id).execute()
+    subjects = res.data
+
     text = "📚 قائمة موادي الدراسية:\nاختر المادة لتصفح فروعها ودروسها أو إدارتها:"
     keyboard = []
     if subjects:
-        for (sub,) in subjects:
+        for item in subjects:
+            sub = item.get('subject_name')
             keyboard.append([
                 InlineKeyboardButton(f"📖 {sub}", callback_data=f"sub_{sub}"),
                 InlineKeyboardButton("حذف المادة 🗑️", callback_data=f"del_sub_{sub}")
@@ -299,6 +291,7 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     keyboard.append([InlineKeyboardButton("➕ إضافة مادة جديدة", callback_data="add_subject")])
     keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     if update.callback_query:
         try:
             await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
@@ -308,12 +301,14 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(text, reply_markup=reply_markup)
 
 async def show_sections_menu_direct(update, context, user_id, subject):
-    cursor.execute("SELECT section_name FROM sections WHERE user_id = ? AND subject_name = ?", (user_id, subject))
-    sections = cursor.fetchall()
+    res = supabase.table('sections').select('section_name').eq('user_id', user_id).eq('subject_name', subject).execute()
+    sections = res.data
+
     keyboard = []
     if sections:
         text = f"📚 مادة: {subject}\nاختر الفرع المطلوب:"
-        for (sec,) in sections:
+        for item in sections:
+            sec = item.get('section_name')
             keyboard.append([
                 InlineKeyboardButton(f"📂 فرع: {sec}", callback_data=f"sec_{subject}_{sec}"),
                 InlineKeyboardButton("حذف الفرع 🗑️", callback_data=f"del_sec_{subject}_{sec}")
@@ -322,27 +317,33 @@ async def show_sections_menu_direct(update, context, user_id, subject):
         text = f"📚 مادة: {subject}\n❌ أنت لا تملك أي فروع في هذه المادة حالياً."
     keyboard.append([InlineKeyboardButton("➕ إضافة فرع جديد", callback_data=f"add_sec_{subject}")])
     keyboard.append([InlineKeyboardButton("🔙 رجوع للمواد", callback_data="show_subjects")])
+
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def show_lessons_menu_direct(update, context, user_id, subject, section):
-    cursor.execute("SELECT rowid, title, content_type FROM lessons WHERE user_id = ? AND subject_name = ? AND section_name = ?", (user_id, subject, section))
-    lessons = cursor.fetchall()
+    res = supabase.table('lessons').select('id, title, content_type').eq('user_id', user_id).eq('subject_name', subject).eq('section_name', section).execute()
+    lessons = res.data
+
     keyboard = []
     if lessons:
         text = f"📂 مادة: {subject} ➔ فرع: {section}\nقائمة الدروس المحفوظة:"
-        for rowid, title, c_type in lessons:
+        for item in lessons:
+            lesson_id = item.get('id')
+            title = item.get('title')
+            c_type = item.get('content_type')
             type_label = "🖼️" if c_type == "photo" else ("📄" if c_type == "document" else "📝")
             keyboard.append([
-                InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op_{rowid}"),
-                InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{rowid}")
+                InlineKeyboardButton(f"{type_label} {title}", callback_data=f"op_{lesson_id}"),
+                InlineKeyboardButton("حذف 🗑️", callback_data=f"dl_{lesson_id}")
             ])
     else:
         text = f"📂 مادة: {subject} ➔ فرع: {section}\n❌ أنت لا تملك أي دروس في هذا الفرع."
     keyboard.append([InlineKeyboardButton("➕ إضافة درس جديد", callback_data=f"add_lesson_{subject}_{section}")])
     keyboard.append([InlineKeyboardButton("🔙 رجوع للفروع", callback_data=f"sub_{subject}")])
+
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
@@ -358,22 +359,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_subjects_menu(update, context)
         return
     elif data == "main_menu":
-        cursor.execute("DELETE FROM user_states WHERE user_id = ?", (user_id,))
-        conn.commit()
+        supabase.table('user_states').delete().eq('user_id', user_id).execute()
         await query.message.edit_text("🏠 القائمة الرئيسية للبوت. اضغط /start للبدء من جديد.")
         return
     elif data == "add_subject":
-        cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", (user_id, "waiting_for_subject", ""))
-        conn.commit()
+        supabase.table('user_states').upsert({'user_id': user_id, 'state': "waiting_for_subject", 'temp_data': ""}).execute()
         await query.message.edit_text("✍️ أرسل الآن اسم المادة الجديدة التي تريد إضافتها:")
         return
 
     if data.startswith("del_sub_"):
         sub_to_del = data.replace("del_sub_", "", 1)
-        cursor.execute("DELETE FROM subjects WHERE user_id = ? AND subject_name = ?", (user_id, sub_to_del))
-        cursor.execute("DELETE FROM sections WHERE user_id = ? AND subject_name = ?", (user_id, sub_to_del))
-        cursor.execute("DELETE FROM lessons WHERE user_id = ? AND subject_name = ?", (user_id, sub_to_del))
-        conn.commit()
+        supabase.table('subjects').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
+        supabase.table('sections').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
+        supabase.table('lessons').delete().eq('user_id', user_id).eq('subject_name', sub_to_del).execute()
         await show_subjects_menu(update, context)
         return
 
@@ -384,17 +382,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("add_sec_"):
         subject = data.replace("add_sec_", "", 1)
-        cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", (user_id, "waiting_for_section", subject))
-        conn.commit()
+        supabase.table('user_states').upsert({'user_id': user_id, 'state': "waiting_for_section", 'temp_data': subject}).execute()
         await query.message.edit_text(f"✍️ أرسل الآن اسم الفرع الجديد الذي تريد إضافته لمادة [{subject}]:")
         return
 
     if data.startswith("del_sec_"):
         parts = data.replace("del_sec_", "", 1).split("_", 1)
         subject, section = parts[0], parts[1]
-        cursor.execute("DELETE FROM sections WHERE user_id = ? AND subject_name = ? AND section_name = ?", (user_id, subject, section))
-        cursor.execute("DELETE FROM lessons WHERE user_id = ? AND subject_name = ? AND section_name = ?", (user_id, subject, section))
-        conn.commit()
+        supabase.table('sections').delete().eq('user_id', user_id).eq('subject_name', subject).eq('section_name', section).execute()
+        supabase.table('lessons').delete().eq('user_id', user_id).eq('subject_name', subject).eq('section_name', section).execute()
         await show_sections_menu_direct(update, context, user_id, subject)
         return
 
@@ -407,38 +403,50 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("add_lesson_"):
         parts = data.replace("add_lesson_", "", 1).split("_", 1)
         subject, section = parts[0], parts[1]
-        cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", 
-                       (user_id, f"waiting_for_lesson_title_{subject}|{section}", f"{subject}|{section}"))
-        conn.commit()
-        await query.message.edit_text(f"✍️ أرسل الآن **عنوان الدرس** الجديد (أو أرسل الصورة/الملف مباشرة):", parse_mode="Markdown")
+        supabase.table('user_states').upsert({
+            'user_id': user_id,
+            'state': f"waiting_for_lesson_title_{subject}|{section}",
+            'temp_data': f"{subject}|{section}"
+        }).execute()
+        await query.message.edit_text("✍️ أرسل الآن **عنوان الدرس** الجديد (أو أرسل الصورة/الملف مباشرة):", parse_mode="Markdown")
         return
 
     if data.startswith("edit_"):
-        rowid = data.replace("edit_", "", 1)
-        cursor.execute("INSERT OR REPLACE INTO user_states (user_id, state, temp_data) VALUES (?, ?, ?)", (user_id, f"waiting_for_edit_lesson_{rowid}", ""))
-        conn.commit()
+        lesson_id = int(data.replace("edit_", "", 1))
+        supabase.table('user_states').upsert({
+            'user_id': user_id,
+            'state': f"waiting_for_edit_lesson_{lesson_id}",
+            'temp_data': ""
+        }).execute()
         await query.message.reply_text("✍️ أرسل الآن **اسم الدرس الجديد**:")
         return
 
     if data.startswith("op_") or data.startswith("dl_"):
-        prefix, rowid = data.split("_", 1)
-        cursor.execute("SELECT subject_name, section_name, title, content_type, file_or_text FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
-        row = cursor.fetchone()
-        if not row:
+        prefix, lesson_id_str = data.split("_", 1)
+        lesson_id = int(lesson_id_str)
+        res = supabase.table('lessons').select('*').eq('id', lesson_id).eq('user_id', user_id).execute()
+        
+        if not res.data:
             await query.message.reply_text("❌ عذراً، لم يتم العثور على العنصر.")
             return
-        subject, section, title, c_type, data_val = row[0], row[1], row[2], row[3], row[4]
+
+        row = res.data[0]
+        subject = row.get('subject_name')
+        section = row.get('section_name')
+        title = row.get('title')
+        c_type = row.get('content_type')
+        data_val = row.get('file_or_text')
         chat_id = query.message.chat_id
+
         if prefix == "dl":
-            cursor.execute("DELETE FROM lessons WHERE rowid = ? AND user_id = ?", (rowid, user_id))
-            conn.commit()
+            supabase.table('lessons').delete().eq('id', lesson_id).eq('user_id', user_id).execute()
             await query.message.reply_text(f"❌ تم حذف الدرس '{title}' بنجاح.")
             await show_lessons_menu_direct(update, context, user_id, subject, section)
         elif prefix == "op":
             action_keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("تعديل الاسم ✏️", callback_data=f"edit_{rowid}"),
-                    InlineKeyboardButton("حذف الدرس 🗑️", callback_data=f"dl_{rowid}")
+                    InlineKeyboardButton("تعديل الاسم ✏️", callback_data=f"edit_{lesson_id}"),
+                    InlineKeyboardButton("حذف الدرس 🗑️", callback_data=f"dl_{lesson_id}")
                 ]
             ])
             if c_type == "text":
