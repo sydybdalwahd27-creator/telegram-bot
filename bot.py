@@ -26,27 +26,29 @@ groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 
 async def handle_ai_chat(update, context):
-  user_message = update.message.text
-  try:
-    chat_completion = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية. تجيب"
-                    " بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية."
-                ),
-            },
-            {"role": "user", "content": user_message},
-        ],
-    )
-    ai_reply = chat_completion.choices[0].message.content
-    await update.message.reply_text(ai_reply)
-  except Exception as e:
-    await update.message.reply_text(
-        "عذراً، حدث خطأ بسيط أثناء معالجة سؤالك العلمي."
-    )
+    user_message = update.message.text
+    try:
+        chat_completion = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية. تجيب"
+                        " بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية."
+                    ),
+                },
+                {"role": "user", "content": user_message},
+            ],
+        )
+        ai_reply = chat_completion.choices[0].message.content
+        await update.message.reply_text(ai_reply)
+    except Exception as e:
+        await update.message.reply_text(
+            "عذراً، حدث خطأ بسيط أثناء معالجة سؤالك العلمي."
+        )
+
+
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
@@ -60,17 +62,20 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-  """Global error handler to prevent bot from crashing."""
-  logger.error("Exception while handling an update:", exc_info=context.error)
 
-  if isinstance(update, Update) and update.effective_message:
-    try:
-      await update.effective_message.reply_text(
-          "Sorry, an unexpected error occurred. Please try again later."
-      )
-    except Exception as e:
-      logger.error(f"Failed to send error message to user: {e}")
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Global error handler to prevent bot from crashing."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "Sorry, an unexpected error occurred. Please try again later."
+            )
+        except Exception as e:
+            logger.error(f"Failed to send error message to user: {e}")
+
+
 DEVELOPER_USERNAME = "@ota_m_pro"
 ADMIN_ID = 8504617214
 
@@ -160,7 +165,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         try:
-            admin_msg = f"🔔 عضو جديد انضم للبوت!\n\n👤 الاسم: {first_name}\n🆔 المعرف: {username}\n🔢 الـ ID: `{user_id}`"
+            admin_msg = (
+                f"🔔 عضو جديد انضم للبوت!\n\n"
+                f"👤 الاسم: {first_name}\n"
+                f"🆔 المعرف: {username}\n"
+                f"🔢 الـ ID: `{user_id}`"
+            )
             await context.bot.send_message(
                 chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown"
             )
@@ -1273,41 +1283,38 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-        application = (
-            ApplicationBuilder()
-            .token(BOT_TOKEN)
-            .request(HTTPXRequest(connect_timeout=30, read_timeout=30))
-            .build()
-        )
-    
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("lessons", lessons_command))
-        application.add_handler(CommandHandler("stats", stats))
-        application.add_handler(CommandHandler("users", list_all_users))
-        application.add_handler(CommandHandler("broadcast", broadcast_message))
-    
-        application.add_handler(CallbackQueryHandler(button_callback))
-    
+    application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .request(HTTPXRequest(connect_timeout=30, read_timeout=30))
+        .build()
+    )
 
-        application.add_handler(
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("lessons", lessons_command))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("users", list_all_users))
+    application.add_handler(CommandHandler("broadcast", broadcast_message))
+
+    application.add_handler(CallbackQueryHandler(button_callback))
+
+    application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ai_chat)
-        )
+    )
 
-        application.add_handler(
+    application.add_handler(
         MessageHandler(
             filters.PHOTO | filters.Document.ALL | filters.VIDEO,
             handle_photo_document,
         )
-        )
+    )
 
-        # معالج الأخطاء العام #
-        application.add_error_handler(error_handler)
+    # معالج الأخطاء العام #
+    application.add_error_handler(error_handler)
 
-        print("Bot is running...")
-        application.run_polling()
-
-
+    print("Bot is running...")
+    application.run_polling()
 
 
 if __name__ == "__main__":
-  main()
+    main()
