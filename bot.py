@@ -1042,13 +1042,13 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "عند الإجابة، يجب أن تكون رسالتك مرتبة ومنسقة بدقة، ولا تكتبها أبداً على شكل فقرة نصية طويلة، واستخدم النقاط والإيموجيات المعبرة."
                     )
                         },
+                        {
                             "role": "user", 
                             "content": user_message
                         }
-                    ]
-                },
+                ],
                 timeout=30
-            )
+            }
             return response.json()
 
         result = await asyncio.to_thread(request_openrouter)
