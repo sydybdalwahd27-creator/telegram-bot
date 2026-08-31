@@ -42,7 +42,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 GROQ_API_KEY = (os.environ.get("GROQ_API_KEY") or "").strip()
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
