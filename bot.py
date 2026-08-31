@@ -1020,44 +1020,29 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         def request_openrouter():
-            response = requests.post(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "https://telegram.org",
-                    "X-Title": "Telegram Study Bot",
+    response = requests.post(
+        url="https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "https://telegram.org",
+            "X-Title": "Telegram Study Bot",
+        },
+        json={
+            "model": "openrouter/free",
+            "messages": [
+                {
+                    "role": "system", 
+                    "content": "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية، والمدير الذكي لبوت التعليم الخاص بالطلاب. إذا سأل المستخدم عن طريقة استخدام البوت، أو استفسر عن خدماته بشكل عام بأي صيغة كانت، يجب عليك أن تشرح له بوضوح وبأسلوب حيوي ومرتب الخدمات التالية: 1. 📚 إضافة المواد والفروع وشرح كيفية ترتيب وتخزين المواد الدراسية الخاصة بهم. 2. 🧠 خطوات حفظ الدروس وتقديم إرشادات واستراتيجيات ذكية ومجربة لحفظ المناهج واستيعابها بسرعة. 3. 📅 تنظيم المهام والجدول وإدارة المهام اليومية والمراجعات بكل سهولة. وعند الإجابة، يجب أن تكون رسالتك مرتبة ومنسقة بدقة، ولا تكتبها أبداً على شكل فقرة نصية طويلة، واستخدم النقاط والإيموجيات المعبرة."
                 },
-                json={
-                    "model": "openrouter/free",
-                    "messages": [
-                        {
-                            "role": "system", 
-                           {
-                            "role": "system", 
-                            "content": "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية، والمدير الذكي لبوت التعليم الخاص بالطلاب. إذا سأل المستخدم عن طريقة استخدام البوت، أو استفسر عن خدماته بشكل عام بأي صيغة كانت، يجب عليك أن تشرح له بوضوح وبأسلوب حيوي ومرتب الخدمات التالية: 1. 📚 إضافة المواد والفروع وشرح كيفية ترتيب وتخزين المواد الدراسية الخاصة بهم. 2. 🧠 خطوات حفظ الدروس وتقديم إرشادات واستراتيجيات ذكية ومجربة لحفظ المناهج واستيعابها بسرعة. 3. 📅 تنظيم المهام والجدول وإدارة المهام اليومية والمراجعات بكل سهولة. وعند الإجابة، يجب أن تكون رسالتك مرتبة ومنسقة بدقة، ولا تكتبها أبداً على شكل فقرة نصية طويلة، واستخدم النقاط والإيموجيات المعبرة."
-                        },
-                        {
-                            "role": "user", 
-                            "content": user_message
-                        }
-                ],
-                timeout=30
-            }
-            return response.json()
-
-        result = await asyncio.to_thread(request_openrouter)
-        
-        if "choices" in result and len(result["choices"]) > 0:
-            ai_reply = result["choices"][0]["message"]["content"]
-            await update.message.reply_text(ai_reply)
-        else:
-            logger.error("OpenRouter Error Response: %s", result)
-            await update.message.reply_text("⚠️ عذراً، لم أتمكن من الحصول على رد من خدمة الذكاء الاصطناعي.")
-
-    except Exception as e:
-        logger.exception("AI request failed: %s", e)
-        await update.message.reply_text("⚠️ حدث خطأ أثناء الاتصال بخدمة الذكاء الاصطناعي.")
-
+                {
+                    "role": "user", 
+                    "content": user_message
+                }
+            ],
+            "timeout": 30
+        }
+    )
+    return response.json()
 # ───────────────────────────────────────────────
 # معالج الأزرار (Callbacks)
 # ───────────────────────────────────────────────
