@@ -1018,8 +1018,7 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    try:
-        def request_openrouter():
+def request_openrouter(user_message, OPENROUTER_API_KEY):
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
@@ -1043,6 +1042,7 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
     )
     return response.json()
+
 # ───────────────────────────────────────────────
 # معالج الأزرار (Callbacks)
 # ───────────────────────────────────────────────
