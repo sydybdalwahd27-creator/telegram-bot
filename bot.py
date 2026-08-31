@@ -1015,7 +1015,9 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_message = update.message.text
+    
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    
     try:
         def request_openrouter():
             response = requests.post(
@@ -1030,7 +1032,13 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "messages": [
                         {
                             "role": "system", 
-                            "content": "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية، تجيب بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية."
+                            "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية، والمدير الذكي لبوت التعليم الخاص بالطلاب. "
+                            "إذا سأل المستخدم عن طريقة استخدام البوت، أو استفسر عن خدماته بشكل عام بأي صيغة كانت (مثل: كيف أستخدم البوت، ما هي مميزاتك، ماذا تقدم، إلخ)، "
+                            "يجب عليك أن تشرح له بوضوح وبأسلوب حيوي ومرتب الخطوات التالية: "
+                            "1. 📚 **إضافة المواد والفروع**: شرح كيفية ترتيب وتخزين المواد الدراسية الخاصة بهم. "
+                            "2. 🧠 **خطوات حفظ الدروس**: تقديم إرشادات واستراتيجيات ذكية ومجربة لحفظ المناهج واستيعابها بسرعة. "
+                            "3. 📅 **تنظيم المهام والجدول**: إدارة المهام اليومية والمراجعات بكل سهولة. "
+                            "عند الإجابة، يجب أن تكون رسالتك مرتبة ومنسقة بدقة، ولا تكتبها أبداً على شكل فقرة نصية طويلة، واستخدم النقاط والإيموجيات المعبرة."
                         },
                         {
                             "role": "user", 
@@ -1447,9 +1455,9 @@ def main():
     # الأزرار التفاعلية
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    # النصوص (handle_text أولاً → يفحص الحالات ثم يسقط للذكاء الاصطناعي)
+    # النصوص (handle_ai_chat أولاً → يفحص الحالات ثم يسقط للذكاء الاصطناعي)
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ai_chat)
     )
 
     # الوسائط
