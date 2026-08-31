@@ -379,13 +379,13 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         u_id = u.get("user_id")
         try:
             await context.bot.send_message(
-                chat_id=u_id, 
+                chat_id=u_id,
                 text=announcement
-        )
-        success_count += 1
-    except Exception as e:
-        fail_count += 1
-        print(f"Error sending to {u_id}: {e}")
+            )
+            success_count += 1
+        except Exception as e:
+            fail_count += 1
+            print(f"Error sending to {u_id}: {e}")
     await asyncio.sleep(0.05)
 
     await update.message.reply_text(
