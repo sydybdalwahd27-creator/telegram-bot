@@ -1054,7 +1054,18 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
     try:
-        response_data = request_openrouter(user_message, OPENROUTER_API_KEY)
+        # request_openrouter يستخدم requests بشكل متزامن، لذلك نشغّله في Thread
+        # حتى لا يوقف Event Loop الخاص ببوت Telegram أثناء انتظار OpenRouter.
+        response_data = await asyncio.to_thread(
+            request_openrouter,
+            user_message,
+            OPENROUTER_API_KEY,
+        )
+
+        # التحقق من استجابة OpenRouter قبل الوصول إلى choices لتجنب أخطاء غير واضحة.
+        if not isinstance(response_data, dict) or not response_data.get("choices"):
+            raise RuntimeError("Invalid AI response from OpenRouter")
+
         ai_reply = response_data["choices"][0]["message"]["content"]
         await update.message.reply_text(ai_reply)
     except Exception as e:
@@ -1436,7 +1447,14 @@ def main():
     application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
-        .request(HTTPXRequest(connect_timeout=30, read_timeout=30))
+        .request(
+            HTTPXRequest(
+                connect_timeout=10,
+                read_timeout=30,
+                write_timeout=30,
+                pool_timeout=10,
+            )
+        )
         .post_init(post_init)
         .build()
     )
@@ -1453,9 +1471,9 @@ def main():
     # الأزرار التفاعلية
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    # النصوص (handle_ai_chat أولاً → يفحص الحالات ثم يسقط للذكاء الاصطناعي)
+    # النصوص: يفحص حالات الإضافة أولاً، ثم يسقط للذكاء الاصطناعي
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ai_chat)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
     )
 
     # الوسائط
