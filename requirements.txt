@@ -1,4 +1,4 @@
 python-telegram-bot
 flask
 supabase
-groq>=0.11.0
+requests
