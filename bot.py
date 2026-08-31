@@ -1009,15 +1009,6 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 # ───────────────────────────────────────────────
-async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not OPENROUTER_API_KEY:
-        await update.message.reply_text("⛔ خدمة الذكاء الاصطناعي غير متاحة حالياً.")
-        return
-
-    user_message = update.message.text
-    
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    
 def request_openrouter(user_message, OPENROUTER_API_KEY):
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
@@ -1049,6 +1040,27 @@ def request_openrouter(user_message, OPENROUTER_API_KEY):
         timeout=30
     )
     return response.json()
+
+
+async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not OPENROUTER_API_KEY:
+        await update.message.reply_text("⛔ خدمة الذكاء الاصطناعي غير متاحة حالياً.")
+        return
+
+    user_message = update.message.text
+    if not user_message:
+        return
+    
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    
+    try:
+        response_data = request_openrouter(user_message, OPENROUTER_API_KEY)
+        ai_reply = response_data["choices"][0]["message"]["content"]
+        await update.message.reply_text(ai_reply)
+    except Exception as e:
+        print(f"Error in AI chat: {e}")
+        await update.message.reply_text("عذراً، حدث خطأ أثناء الاتصال بالذكاء الاصطناعي.")
+
 # ───────────────────────────────────────────────
 # معالج الأزرار (Callbacks)
 # ───────────────────────────────────────────────
