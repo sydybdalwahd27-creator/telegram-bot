@@ -21,7 +21,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 from supabase import create_client, Client
 import logging
-from google import genai
+import requests
 
 # ───────────────────────────────────────────────
 # إعداد السجل (Logging)
@@ -41,7 +41,7 @@ ADMIN_ID = 8504617214
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
+OPENROUTER_API_KEY = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
 
 if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
@@ -50,9 +50,8 @@ if not BOT_TOKEN or not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-if not ai_client:
-    logger.warning("GEMINI_API_KEY is missing; AI service is disabled.")
+if not OPENROUTER_API_KEY:
+    logger.warning("OPENROUTER_API_KEY is missing; AI service is disabled.")
 
 # ───────────────────────────────────────────────
 # خادم ويب وهمي (للـ Health Check على Render)
@@ -1010,55 +1009,50 @@ async def handle_photo_document(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 # ───────────────────────────────────────────────
-# --- AI Gemini Service ---
-# ───────────────────────────────────────────────
 async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not ai_client:
-        await update.message.reply_text(
-            "⛔ خدمة الذكاء الاصطناعي غير متاحة حالياً."
-        )
+    if not OPENROUTER_API_KEY:
+        await update.message.reply_text("⛔ خدمة الذكاء الاصطناعي غير متاحة حالياً.")
         return
 
     user_message = update.message.text
     try:
-        def request_ai_response():
-            return ai_client.models.generate_content(
-                model="gemini-3.7-flash",
-                contents=[
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": (
-                                    "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية، تجيب بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية.\n\n"
-                                    f"سؤال الطالب: {user_message}"
-                                )
-                            }
-                        ],
-                    }
-                ],
+        def request_openrouter():
+            response = requests.post(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "https://telegram.org",
+                    "X-Title": "Telegram Study Bot",
+                },
+                json={
+                    "model": "openrouter/free",
+                    "messages": [
+                        {
+                            "role": "system", 
+                            "content": "أنت معلم خبير ومحترف في كافة العلوم والمواد الدراسية، تجيب بطريقة مبسطة، ودقيقة، وداعمة للطلاب باللغة العربية."
+                        },
+                        {
+                            "role": "user", 
+                            "content": user_message
+                        }
+                    ]
+                },
+                timeout=30
             )
+            return response.json()
 
-        chat_completion = await asyncio.to_thread(request_ai_response)
-        if not chat_completion or not chat_completion.text:
-            raise RuntimeError("Gemini returned no text")
+        result = await asyncio.to_thread(request_openrouter)
+        
+        if "choices" in result and len(result["choices"]) > 0:
+            ai_reply = result["choices"][0]["message"]["content"]
+            await update.message.reply_text(ai_reply)
+        else:
+            logger.error("OpenRouter Error Response: %s", result)
+            await update.message.reply_text("⚠️ عذراً، لم أتمكن من الحصول على رد من خدمة الذكاء الاصطناعي.")
 
-        ai_reply = chat_completion.text
-
-        await update.message.reply_text(ai_reply)
     except Exception as e:
         logger.exception("AI request failed: %s", e)
-        error_code = getattr(e, "status_code", None)
-        if error_code == 401:
-            user_error = "مفتاح GEMINI_API_KEY غير صحيح أو منتهي."
-        elif error_code == 429:
-            user_error = "تم تجاوز حد Gemini أو الرصيد المتاح مؤقتاً."
-        elif error_code == 404:
-            user_error = f"نموذج الذكاء الاصطناعي غير متاح: {gemini-3.7-flash}"
-        else:
-            user_error = "تعذر الاتصال بخدمة الذكاء الاصطناعي حالياً. تحقق من إعدادات Gemini وسجل التشغيل."
-        await update.message.reply_text(f"⚠️ {user_error}")
-
+        await update.message.reply_text("⚠️ حدث خطأ أثناء الاتصال بخدمة الذكاء الاصطناعي.")
 
 # ───────────────────────────────────────────────
 # معالج الأزرار (Callbacks)
