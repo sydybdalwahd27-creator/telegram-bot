@@ -366,6 +366,7 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     announcement = " ".join(context.args)
+    success_count = fail_count = 0
     try:
         res = await sb_execute(
             lambda: supabase.table("users").select("user_id").execute()
@@ -374,7 +375,6 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         users = []
 
-        success_count = fail_count = 0
     for u in users:
         u_id = u.get("user_id")
         try:
