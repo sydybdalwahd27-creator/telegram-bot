@@ -374,17 +374,19 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         users = []
 
-    success_count = fail_count = 0
+        success_count = fail_count = 0
     for u in users:
         u_id = u.get("user_id")
         try:
             await context.bot.send_message(
-                chat_id=u_id, text=announcement, parse_mode="Markdown"
-            )
-            success_count += 1
-        except Exception:
-            fail_count += 1
-        await asyncio.sleep(0.05)  # Rate limiting
+                chat_id=u_id, 
+                text=announcement
+        )
+        success_count += 1
+    except Exception as e:
+        fail_count += 1
+        print(f"Error sending to {u_id}: {e}")
+    await asyncio.sleep(0.05)
 
     await update.message.reply_text(
         f"📢 تم الإرسال بنجاح!\n✅ وصل إلى: {success_count}\n❌ فشل: {fail_count}"
