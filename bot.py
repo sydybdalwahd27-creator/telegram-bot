@@ -1015,6 +1015,7 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_message = update.message.text
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
         def request_openrouter():
             response = requests.post(
