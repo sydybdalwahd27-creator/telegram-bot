@@ -1024,7 +1024,7 @@ def request_openrouter(user_message, OPENROUTER_API_KEY):
         headers={
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "HTTP-Referer": "https://telegram.org",
-            "X-Title": "Telegram Study Bot",
+            "X-Title": "Telegram Study Bot"
         },
         json={
             "model": "openrouter/free",
@@ -1037,9 +1037,9 @@ def request_openrouter(user_message, OPENROUTER_API_KEY):
                     "role": "user", 
                     "content": user_message
                 }
-            ],
-            "timeout": 30
-        }
+            ]
+        },
+        timeout=30
     )
     return response.json()
 
